@@ -79,6 +79,37 @@ test("buildTelegramCommands includes .codex skill aliases", async () => {
   assert.match(skillCommand.description, /test-driven-development/);
 });
 
+test("buildTelegramCommands reads folded skill descriptions", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "codex-skills-"));
+  const skillDir = path.join(root, "folded-skill");
+  await fs.mkdir(skillDir, { recursive: true });
+  await fs.writeFile(
+    path.join(skillDir, "SKILL.md"),
+    [
+      "---",
+      "name: folded-skill",
+      "description: >",
+      "  First line of the description.",
+      "  Second line of the description.",
+      "---",
+      "",
+      "# Skill body",
+      ""
+    ].join("\n")
+  );
+
+  const commands = await buildTelegramCommands({ skillRoots: [root] });
+  const skillCommand = commands.find(
+    (command) => command.command === "s_folded_skill"
+  );
+
+  assert.ok(skillCommand);
+  assert.match(
+    skillCommand.description,
+    /First line of the description\. Second line/
+  );
+});
+
 test("resolveCodexSkillCommand maps Telegram aliases back to skill names", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "codex-skills-"));
   await createSkill(

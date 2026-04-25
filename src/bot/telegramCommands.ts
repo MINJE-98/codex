@@ -75,8 +75,29 @@ function parseFrontmatterValue(source: string, key: string): string {
   const frontmatter = source.match(/^---\s*\n([\s\S]*?)\n---/);
   if (!frontmatter) return "";
 
-  const pattern = new RegExp(`^${key}:\\s*["']?(.+?)["']?\\s*$`, "m");
-  return frontmatter[1].match(pattern)?.[1]?.trim() || "";
+  const lines = frontmatter[1].split(/\r?\n/);
+  const pattern = new RegExp(`^${key}:\\s*(.*?)\\s*$`);
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const match = lines[i].match(pattern);
+    if (!match) continue;
+
+    const rawValue = match[1].trim();
+    if (/^[>|]/.test(rawValue)) {
+      const blockLines: string[] = [];
+      for (let j = i + 1; j < lines.length; j += 1) {
+        const line = lines[j];
+        if (/^\S[^:]*:\s*/.test(line)) break;
+        blockLines.push(line.replace(/^\s+/, ""));
+      }
+
+      return blockLines.join(" ").trim();
+    }
+
+    return rawValue.replace(/^["']|["']$/g, "").trim();
+  }
+
+  return "";
 }
 
 function truncateDescription(value: string): string {
