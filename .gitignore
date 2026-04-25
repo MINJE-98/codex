@@ -1,0 +1,7 @@
+node_modules/
+.env
+.DS_Store
+npm-debug.log*
+.codex-telegram-claws-state.json
+bot.log
+bot.err.log

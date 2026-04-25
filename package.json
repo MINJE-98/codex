@@ -1,0 +1,71 @@
+{
+  "name": "CodexClaw",
+  "version": "0.2.3",
+  "description": "A super Telegram bot that securely orchestrates Codex via SDK or CLI/PTy streaming, MCP routing, and GitHub automation skills.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "check": "npm run typecheck",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "lint": "eslint src tests scripts eslint.config.ts eslint.config.js ecosystem.config.ts ecosystem.config.cjs",
+    "lint:fix": "npm run lint -- --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "healthcheck": "tsx scripts/healthcheck.ts",
+    "healthcheck:strict": "tsx scripts/healthcheck.ts --strict",
+    "healthcheck:live": "tsx scripts/healthcheck.ts --codex-live --telegram-live",
+    "telegram:smoke": "tsx scripts/telegramSmoke.ts",
+    "ci": "npm run check && npm run lint && npm run format:check && npm test && npm run healthcheck",
+    "release:check": "npm run ci && npm run healthcheck:strict"
+  },
+  "keywords": [
+    "telegram",
+    "telegram-bot",
+    "telegraf",
+    "codex",
+    "openai",
+    "claude-code",
+    "remote-coding",
+    "ai-agent",
+    "github-integration",
+    "mcp",
+    "subagents",
+    "developer-tools",
+    "skill",
+    "node-pty",
+    "agent"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.13.2",
+    "@octokit/rest": "^22.0.0",
+    "@openai/codex-sdk": "^0.124.0",
+    "dotenv": "^16.4.7",
+    "https-proxy-agent": "^8.0.0",
+    "lodash.throttle": "^4.1.1",
+    "node-cron": "^4.0.5",
+    "node-pty": "^1.0.0",
+    "simple-git": "^3.28.0",
+    "strip-ansi": "^7.1.0",
+    "telegraf": "^4.16.3",
+    "undici": "^7.24.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/lodash.throttle": "^4.1.9",
+    "@types/node": "^25.5.0",
+    "@typescript-eslint/eslint-plugin": "^8.57.0",
+    "@typescript-eslint/parser": "^8.57.0",
+    "eslint": "^9.17.0",
+    "globals": "^17.4.0",
+    "prettier": "^3.8.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}
