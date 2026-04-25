@@ -359,7 +359,7 @@ function summarizeCommandExecution(
   if (output && (verbose || item.status === "failed")) {
     lines.push("output:", tailText(output, 2000));
   }
-  return lines.join("\n");
+  return ["```text", ...lines, "```"].join("\n");
 }
 
 function summarizeFileChange(

@@ -335,6 +335,10 @@ test("pty manager renders SDK todo command and file progress in Telegram", async
   assert.match(rendered, /cmd:completed/);
   assert.match(rendered, /npm test/);
   assert.match(rendered, /exit 0/);
+  assert.match(
+    rendered,
+    /```text\n\[cmd:completed exit 0\]\nnpm test\noutput:\n111 tests passed\n```/
+  );
   assert.match(rendered, /files:completed/);
   assert.match(rendered, /src\/runner\/ptyManager\\.ts/);
 });
@@ -406,6 +410,56 @@ test("pty manager keeps SDK command progress out of non-verbose Telegram replies
   assert.match(
     rendered,
     /Updated config\\.toml \\\(`\/Users\/home\/\.codex\/config\.toml:1`\\\)\\./
+  );
+});
+
+test("pty manager renders failed SDK commands as code blocks without verbose output", async () => {
+  const sentMessages: SentMessageRecord[] = [];
+  const manager = createManager({
+    backend: "sdk",
+    telegram: {
+      sendMessage: async (chatId: string | number, text: string) => {
+        sentMessages.push({ chatId, text, messageId: sentMessages.length + 1 });
+        return { message_id: sentMessages.length };
+      },
+      editMessageText: async (
+        chatId: string | number,
+        messageId: number,
+        _inlineMessageId: unknown,
+        text: string
+      ) => {
+        sentMessages.push({ chatId, text, messageId, edited: true });
+        return {};
+      },
+      deleteMessage: async () => ({})
+    },
+    codexClientFactory: createFakeCodexClient([
+      {
+        events: async function* () {
+          yield {
+            type: "item.completed",
+            item: {
+              id: "cmd-1",
+              type: "command_execution",
+              command: "python3 tools/gmgn.py trades CA 20",
+              aggregated_output: "HTTP 403 forbidden",
+              exit_code: 1,
+              status: "failed"
+            }
+          };
+        }
+      }
+    ])
+  });
+
+  await manager.sendPrompt({ chat: { id: 42 } }, "check trades");
+  await waitFor(() => !manager.getStatus(42).active);
+  await waitFor(() => sentMessages.length > 0);
+
+  const rendered = sentMessages.at(-1)?.text || "";
+  assert.match(
+    rendered,
+    /```text\n\[cmd:failed exit 1\]\npython3 tools\/gmgn\.py trades CA 20\noutput:\nHTTP 403 forbidden\n```/
   );
 });
 
