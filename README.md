@@ -218,6 +218,8 @@ Telegram adaptation notes:
 
 - In private DMs, plain text messages behave like a normal Codex conversation turn
 - In group chats, the bot stays silent unless the message mentions the bot username, such as `@YourBot fix this` or `/status@YourBot`
+- On startup, the bot publishes its Telegram command menu with Bot API `setMyCommands`
+- Codex skills discovered under `$CODEX_HOME/skills` (default `~/.codex/skills`) and repo `.codex/skills/**/SKILL.md` are exposed as safe aliases like `/s_test_driven_development <task>`
 - `/exec` runs a one-off Codex task and does not overwrite the saved project conversation slot
 - `/auto` runs a one-off Codex task with `approvalPolicy=never` on the SDK backend, or `codex exec --full-auto` on the CLI backend
 - `/new` is implemented by the bot and resets the current chat session

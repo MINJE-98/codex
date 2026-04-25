@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { registerHandlers } from "../src/bot/handlers.js";
 
 type Handler = (ctx: TestContext) => Promise<void> | void;
@@ -85,9 +88,28 @@ function createContext(
   };
 }
 
+async function createCodexSkill(name: string): Promise<string> {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "codex-skills-"));
+  const skillDir = path.join(root, name);
+  await fs.mkdir(skillDir, { recursive: true });
+  await fs.writeFile(
+    path.join(skillDir, "SKILL.md"),
+    [
+      "---",
+      `name: ${name}`,
+      "description: Test skill.",
+      "---",
+      "",
+      "# Test skill",
+      ""
+    ].join("\n")
+  );
+  return root;
+}
+
 function createDependencies(
   overrides: {
-    sendPrompt?: () => Promise<unknown>;
+    sendPrompt?: (ctx: TestContext, prompt: string) => Promise<unknown>;
     continuePendingPrompt?: () => Promise<unknown>;
     routeMessage?: (text: string) => Promise<unknown>;
     githubExecute?: () => Promise<unknown>;
@@ -104,6 +126,8 @@ function createDependencies(
     devLogs?: () => string;
     devUrl?: () => string | null;
     restart?: () => Promise<void>;
+    syncTelegramCommands?: () => Promise<boolean>;
+    codexSkillRoots?: string[];
   } = {}
 ) {
   const bot = new FakeBot();
@@ -251,7 +275,9 @@ function createDependencies(
       ? {
           restart: overrides.restart
         }
-      : undefined
+      : undefined,
+    syncTelegramCommands: overrides.syncTelegramCommands,
+    codexSkillRoots: overrides.codexSkillRoots
   });
 
   return { bot };
@@ -491,6 +517,27 @@ test("skill list explains that superpowers is internal and not toggleable", asyn
   assert.match(ctx.replies[0].text, /not toggleable/i);
 });
 
+test("skill state changes resync the Telegram command menu", async () => {
+  let syncCalls = 0;
+  const { bot } = createDependencies({
+    syncTelegramCommands: async () => {
+      syncCalls += 1;
+      return true;
+    }
+  });
+  const ctx = createContext("/skill off github");
+  const handler = bot.commands.get("skill");
+
+  if (!handler) {
+    throw new Error("Expected /skill handler to be registered");
+  }
+
+  await handler(ctx);
+
+  assert.equal(syncCalls, 1);
+  assert.equal(ctx.replies.length > 0, true);
+});
+
 test("restart command schedules restart after replying", async () => {
   let restartCalls = 0;
   const { bot } = createDependencies({
@@ -626,6 +673,33 @@ test("command handlers respond to mentioned group commands", async () => {
 
   assert.equal(ctx.replies.length > 0, true);
   assert.match(ctx.replies[0].text, /Codex Dashboard/i);
+});
+
+test("text handler routes .codex skill aliases to Codex with skill instruction", async () => {
+  const skillRoot = await createCodexSkill("test-driven-development");
+  const prompts: string[] = [];
+  const { bot } = createDependencies({
+    codexSkillRoots: [skillRoot],
+    sendPrompt: async (_ctx, prompt) => {
+      prompts.push(prompt);
+      return {
+        started: true,
+        mode: "sdk"
+      };
+    }
+  });
+  const ctx = createContext("/s_test_driven_development write failing tests");
+  const textHandler = bot.events.get("text");
+
+  if (!textHandler) {
+    throw new Error("Expected text handler to be registered");
+  }
+
+  await textHandler(ctx);
+
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0], /test-driven-development/);
+  assert.match(prompts[0], /write failing tests/);
 });
 
 test("continue command replays a blocked request once", async () => {

@@ -76,7 +76,8 @@ const MESSAGES: Record<Locale, TranslationCatalog> = {
       "/stop - Terminate the active Codex run",
       "/cron_now - Trigger the daily summary immediately",
       "/gh ... - GitHub skill",
-      "/mcp ... - MCP control and explicit tool calls"
+      "/mcp ... - MCP control and explicit tool calls",
+      "/s_<skill> <task> - Run Codex with a discovered .codex skill"
     ],
     statusLines: ({
       status,
@@ -558,7 +559,8 @@ const MESSAGES: Record<Locale, TranslationCatalog> = {
       "/stop - 终止当前 Codex 任务",
       "/cron_now - 立即触发日报",
       "/gh ... - GitHub skill",
-      "/mcp ... - MCP 控制与显式工具调用"
+      "/mcp ... - MCP 控制与显式工具调用",
+      "/s_<skill> <task> - 使用已发现的 .codex skill 运行 Codex"
     ],
     statusLines: ({
       status,

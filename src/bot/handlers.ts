@@ -5,6 +5,7 @@ import {
   extractCommandPayload,
   suggestClosestWord
 } from "./commandUtils.js";
+import { resolveCodexSkillCommand } from "./telegramCommands.js";
 import {
   normalizeLanguage,
   SUPPORTED_LANGUAGES,
@@ -41,6 +42,8 @@ interface RegisterHandlersOptions {
   adminActions?: {
     restart?: () => Promise<void>;
   };
+  syncTelegramCommands?: () => Promise<boolean>;
+  codexSkillRoots?: string[];
 }
 
 type Handler = (ctx: any) => Promise<void> | void;
@@ -454,7 +457,9 @@ export function registerHandlers({
   skills,
   skillRegistry,
   scheduler,
-  adminActions
+  adminActions,
+  syncTelegramCommands,
+  codexSkillRoots
 }: RegisterHandlersOptions): void {
   const localeOf = (chatId: string | number): Locale =>
     ptyManager.getLanguage(chatId);
@@ -656,6 +661,11 @@ export function registerHandlers({
       const actionResult = /^on$/i.test(action)
         ? skillRegistry.enable(ctx.chat.id, rawName)
         : skillRegistry.disable(ctx.chat.id, rawName);
+
+      if (actionResult.changed) {
+        await syncTelegramCommands?.();
+      }
+
       if (/^on$/i.test(action)) {
         await sendChunkedMarkdown(
           ctx,
@@ -1212,7 +1222,31 @@ export function registerHandlers({
       );
       return;
     }
-    if (text.startsWith("/")) return;
+    if (text.startsWith("/")) {
+      const skillInvocation = await resolveCodexSkillCommand(text, {
+        skillRoots: codexSkillRoots
+      });
+      if (!skillInvocation) return;
+
+      if (!skillInvocation.task) {
+        await sendChunkedMarkdown(
+          ctx,
+          `Use /${skillInvocation.command} <task> to run Codex with skill ${skillInvocation.skillName}.`
+        );
+        return;
+      }
+
+      const result = await ptyManager.sendPrompt(
+        ctx,
+        [
+          `Use the ${skillInvocation.skillName} skill for this task.`,
+          "",
+          skillInvocation.task
+        ].join("\n")
+      );
+      await handlePromptResult(ctx, locale, result);
+      return;
+    }
 
     try {
       const route = await router.routeMessage(text, {

@@ -5,6 +5,10 @@ import { loadConfig } from "./config.js";
 import { RuntimeStateStore } from "./runtimeStateStore.js";
 import { createAuthMiddleware } from "./bot/middleware.js";
 import { registerHandlers } from "./bot/handlers.js";
+import {
+  defaultCodexSkillRoots,
+  syncTelegramCommands
+} from "./bot/telegramCommands.js";
 import { Router } from "./orchestrator/router.js";
 import { McpClient } from "./orchestrator/mcpClient.js";
 import { SkillRegistry } from "./orchestrator/skillRegistry.js";
@@ -29,6 +33,7 @@ const bot = new Telegraf(config.telegram.botToken, {
       : {})
   }
 });
+const codexSkillRoots = defaultCodexSkillRoots();
 const stateStore = new RuntimeStateStore({ config });
 let mcpClient: McpClient | null = null;
 let skillRegistry: SkillRegistry | null = null;
@@ -127,7 +132,10 @@ registerHandlers({
   scheduler,
   adminActions: {
     restart: restartBotProcess
-  }
+  },
+  syncTelegramCommands: () =>
+    syncTelegramCommands(bot, { skillRoots: codexSkillRoots }),
+  codexSkillRoots
 });
 
 bot.catch(async (error: unknown, ctx: any) => {
@@ -136,6 +144,7 @@ bot.catch(async (error: unknown, ctx: any) => {
   await ctx.reply(`Bot error: ${message}`).catch(() => {});
 });
 
+await syncTelegramCommands(bot, { skillRoots: codexSkillRoots });
 await bot.launch();
 console.log("CodexClaw started.");
 
