@@ -93,6 +93,8 @@ For agent-oriented setup, see [SKILL.md](SKILL.md).
 - `npm run healthcheck:strict` - stricter production-oriented health check
 - `npm run healthcheck:live` - live Codex + Telegram probe against the configured backend and bot token
 - `npm run telegram:smoke` - live Telegram API smoke test when a real bot token is available
+- `npm run service:root:install` - install the bot as a root macOS LaunchDaemon
+- `npm run service:root:uninstall` - remove the root LaunchDaemon and restore the user LaunchAgent when present
 
 ## Architecture
 
@@ -427,7 +429,7 @@ Release references:
 
 - Whitelist-only access (`ALLOWED_USER_IDS`) is mandatory
 - Do not commit `.env`, tokens, or session artifacts
-- Run bot under a restricted OS user in production
+- Run bot under a restricted OS user in production unless you intentionally install the root LaunchDaemon mode
 - Keep `CODEX_WORKDIR` scoped to a safe workspace root
 - Keep `WORKSPACE_ROOT` limited to a parent directory that only contains projects you want the bot to access
 - Keep `/sh` disabled unless you need it; when enabled, only expose read-only or narrowly scoped command prefixes
@@ -437,6 +439,24 @@ Release references:
 - Prefer least-privilege GitHub PAT
 
 ## Operations
+
+### Root LaunchDaemon Mode
+
+The default local service runs as a user LaunchAgent. To run every bot action with root privileges on macOS, install the root LaunchDaemon:
+
+```bash
+npm run service:root:install
+```
+
+This writes `/Library/LaunchDaemons/com.minje.codexclaw.plist`, stops the user LaunchAgent, and starts `com.minje.codexclaw` in the `system` launchd domain as `root`. It keeps `HOME=/Users/home` and `CODEX_HOME=/Users/home/.codex` so existing `.codex` skills and local repo configuration still resolve.
+
+Rollback:
+
+```bash
+npm run service:root:uninstall
+```
+
+The install/uninstall scripts require macOS administrator authentication through `sudo`. Passwords are never written to repo files or environment files.
 
 The recommended production supervisor is PM2.
 
