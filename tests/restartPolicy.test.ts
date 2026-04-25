@@ -8,7 +8,7 @@ test("restart policy lets unmanaged processes spawn a replacement", () => {
 
 test("restart policy relies on launchd when XPC service name is present", () => {
   assert.equal(
-    shouldSpawnDetachedRestart({ XPC_SERVICE_NAME: "com.minje.codexclaw" }),
+    shouldSpawnDetachedRestart({ XPC_SERVICE_NAME: "com.codexclaw.bot" }),
     false
   );
 });

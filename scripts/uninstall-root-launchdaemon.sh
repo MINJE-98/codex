@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-LABEL="com.minje.codexclaw"
+LABEL="com.codexclaw.bot"
 OWNER_HOME="${CODEXCLAW_HOME:-/Users/home}"
 OWNER_UID="${OWNER_UID:-${SUDO_UID:-501}}"
 PLIST="/Library/LaunchDaemons/${LABEL}.plist"

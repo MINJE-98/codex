@@ -448,7 +448,7 @@ The default local service runs as a user LaunchAgent. To run every bot action wi
 npm run service:root:install
 ```
 
-This writes `/Library/LaunchDaemons/com.minje.codexclaw.plist`, stops the user LaunchAgent, and starts `com.minje.codexclaw` in the `system` launchd domain as `root`. It keeps `HOME=/Users/home` and `CODEX_HOME=/Users/home/.codex` so existing `.codex` skills and local repo configuration still resolve.
+This writes `/Library/LaunchDaemons/com.codexclaw.bot.plist`, stops the user LaunchAgent with the same label, and starts `com.codexclaw.bot` in the `system` launchd domain as `root`. It keeps `HOME=/Users/home` and `CODEX_HOME=/Users/home/.codex` so existing `.codex` skills and local repo configuration still resolve.
 
 Rollback:
 

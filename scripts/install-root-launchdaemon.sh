@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-LABEL="com.minje.codexclaw"
+LABEL="com.codexclaw.bot"
+LEGACY_LABELS=("com.minje.codexclaw")
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 NODE_BIN="${NODE_BIN:-/opt/homebrew/bin/node}"
@@ -45,6 +46,20 @@ if [[ ! -f "${ENTRYPOINT}" ]]; then
   echo "Entrypoint was not found: ${ENTRYPOINT}" >&2
   exit 1
 fi
+
+stop_label() {
+  local label="$1"
+  local plist="/Library/LaunchDaemons/${label}.plist"
+  local agent_plist="${OWNER_HOME}/Library/LaunchAgents/${label}.plist"
+
+  /bin/launchctl bootout "gui/${OWNER_UID}" "${agent_plist}" 2>/dev/null || true
+  /bin/launchctl bootout "system/${label}" 2>/dev/null || true
+  /bin/launchctl bootout system "${plist}" 2>/dev/null || true
+}
+
+for legacy_label in "${LEGACY_LABELS[@]}"; do
+  stop_label "${legacy_label}"
+done
 
 /bin/launchctl bootout "gui/${OWNER_UID}" "${AGENT_PLIST}" 2>/dev/null || true
 /bin/launchctl bootout "system/${LABEL}" 2>/dev/null || true
