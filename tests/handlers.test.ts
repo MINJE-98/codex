@@ -22,8 +22,16 @@ interface TestContext {
   };
   message: {
     text: string;
+    reply_to_message?: {
+      from?: {
+        id?: number;
+        is_bot?: boolean;
+        username?: string;
+      };
+    };
   };
   botInfo?: {
+    id?: number;
     username: string;
   };
   callbackQuery?: {
@@ -57,10 +65,13 @@ function createContext(
   chatId = 1,
   options: {
     chatType?: string;
+    botId?: number;
     botUsername?: string;
+    replyToBot?: boolean;
   } = {}
 ): TestContext {
   const replies: ReplyRecord[] = [];
+  const botId = options.botId ?? 999;
   return {
     chat: {
       id: chatId,
@@ -70,10 +81,22 @@ function createContext(
       id: chatId
     },
     message: {
-      text
+      text,
+      ...(options.replyToBot
+        ? {
+            reply_to_message: {
+              from: {
+                id: botId,
+                is_bot: true,
+                username: options.botUsername
+              }
+            }
+          }
+        : {})
     },
     botInfo: options.botUsername
       ? {
+          id: botId,
           username: options.botUsername
         }
       : undefined,
@@ -640,6 +663,33 @@ test("text handler responds to group messages that mention the bot", async () =>
   assert.equal(routedText, "please fix the repo");
 });
 
+test("text handler responds to group replies to the bot", async () => {
+  let routedText = "";
+  const { bot } = createDependencies({
+    routeMessage: async (text: string) => {
+      routedText = text;
+      return {
+        target: "pty" as const,
+        prompt: text
+      };
+    }
+  });
+  const ctx = createContext("please fix the repo", -100, {
+    chatType: "group",
+    botUsername: "CodexClawBot",
+    replyToBot: true
+  });
+  const textHandler = bot.events.get("text");
+
+  if (!textHandler) {
+    throw new Error("Expected text handler to be registered");
+  }
+
+  await textHandler(ctx);
+
+  assert.equal(routedText, "please fix the repo");
+});
+
 test("command handlers ignore unmentioned group commands", async () => {
   const { bot } = createDependencies();
   const ctx = createContext("/status", -100, {
@@ -662,6 +712,25 @@ test("command handlers respond to mentioned group commands", async () => {
   const ctx = createContext("/status@CodexClawBot", -100, {
     chatType: "group",
     botUsername: "CodexClawBot"
+  });
+  const handler = bot.commands.get("status");
+
+  if (!handler) {
+    throw new Error("Expected /status handler to be registered");
+  }
+
+  await handler(ctx);
+
+  assert.equal(ctx.replies.length > 0, true);
+  assert.match(ctx.replies[0].text, /Codex Dashboard/i);
+});
+
+test("command handlers respond to group command replies to the bot", async () => {
+  const { bot } = createDependencies();
+  const ctx = createContext("/status", -100, {
+    chatType: "group",
+    botUsername: "CodexClawBot",
+    replyToBot: true
   });
   const handler = bot.commands.get("status");
 

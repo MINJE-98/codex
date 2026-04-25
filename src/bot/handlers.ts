@@ -63,9 +63,35 @@ function getBotUsername(ctx: any): string {
   return String(raw).replace(/^@/, "").trim();
 }
 
+function getBotId(ctx: any): string {
+  const raw =
+    ctx.botInfo?.id || ctx.telegram?.botInfo?.id || ctx.bot?.botInfo?.id || "";
+
+  return String(raw).trim();
+}
+
 function requiresMention(ctx: any): boolean {
   const chatType = String(ctx.chat?.type || "");
   return Boolean(chatType && chatType !== "private");
+}
+
+function isReplyToBot(ctx: any, username: string): boolean {
+  const replyFrom = ctx.message?.reply_to_message?.from;
+  if (!replyFrom) return false;
+
+  const botId = getBotId(ctx);
+  if (botId && String(replyFrom.id || "") === botId) {
+    return true;
+  }
+
+  const replyUsername = String(replyFrom.username || "")
+    .replace(/^@/, "")
+    .trim();
+  return Boolean(
+    username &&
+    replyUsername &&
+    replyUsername.toLowerCase() === username.toLowerCase()
+  );
 }
 
 function normalizeMentionedText(ctx: any): {
@@ -84,7 +110,7 @@ function normalizeMentionedText(ctx: any): {
 
   const mentionPattern = `@${escapeRegExp(username)}(?![A-Za-z0-9_])`;
   if (!new RegExp(mentionPattern, "i").test(text)) {
-    return { allowed: false, text };
+    return { allowed: isReplyToBot(ctx, username), text };
   }
 
   return {
