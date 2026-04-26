@@ -75,6 +75,7 @@ export type TopicGateResult =
 
 interface TopicHarnessOptions {
   now?: () => Date;
+  onChange?: () => void;
 }
 
 function emptyProject(): ProjectTopicSnapshot {
@@ -106,10 +107,12 @@ function durableForStoredContext(
 export class TopicHarness {
   private readonly chats: Map<string, Map<string, ProjectTopicSnapshot>>;
   private readonly now: () => Date;
+  private readonly onChange?: () => void;
 
   constructor(options: TopicHarnessOptions = {}) {
     this.chats = new Map();
     this.now = options.now || (() => new Date());
+    this.onChange = options.onChange;
   }
 
   evaluateIncoming(input: EvaluateIncomingInput): TopicGateResult {
@@ -135,6 +138,7 @@ export class TopicHarness {
         : null;
       if (topic) {
         project.activeTopicId = topic.id;
+        this.changed();
       }
       return {
         action: "process",
@@ -146,6 +150,7 @@ export class TopicHarness {
     if (input.sameTopic) {
       activeTopic.lastUserIntent = input.text;
       activeTopic.updatedAt = this.timestamp();
+      this.changed();
       return {
         action: "process",
         topic: activeTopic,
@@ -155,6 +160,7 @@ export class TopicHarness {
 
     const pendingSwitch = this.buildPendingSwitch(input);
     project.pendingSwitch = pendingSwitch;
+    this.changed();
     return {
       action: "ask_switch",
       activeTopic,
@@ -176,6 +182,7 @@ export class TopicHarness {
       "pending"
     );
     project.pendingSwitch = null;
+    this.changed();
     return topic;
   }
 
@@ -199,6 +206,7 @@ export class TopicHarness {
     );
     project.activeTopicId = topic.id;
     project.pendingSwitch = null;
+    this.changed();
     return topic;
   }
 
@@ -222,6 +230,7 @@ export class TopicHarness {
     );
     project.activeTopicId = topic.id;
     project.pendingSwitch = null;
+    this.changed();
     return topic;
   }
 
@@ -236,6 +245,7 @@ export class TopicHarness {
     active.status = "paused";
     active.updatedAt = this.timestamp();
     project.activeTopicId = null;
+    this.changed();
     return active;
   }
 
@@ -250,6 +260,7 @@ export class TopicHarness {
     active.status = "done";
     active.updatedAt = this.timestamp();
     project.activeTopicId = null;
+    this.changed();
     return active;
   }
 
@@ -265,6 +276,7 @@ export class TopicHarness {
     if (project.activeTopicId === topic.id) {
       project.activeTopicId = null;
     }
+    this.changed();
     return topic;
   }
 
@@ -278,6 +290,7 @@ export class TopicHarness {
     const topic = this.requireTopic(project, topicId);
     topic.codexThreadId = threadId;
     topic.updatedAt = this.timestamp();
+    this.changed();
   }
 
   getProject(chatId: string | number, workdir: string): ProjectTopicSnapshot {
@@ -463,5 +476,9 @@ export class TopicHarness {
 
   private timestamp(): string {
     return this.now().toISOString();
+  }
+
+  private changed(): void {
+    this.onChange?.();
   }
 }

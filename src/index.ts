@@ -115,7 +115,9 @@ ptyManager = new PtyManager({
   onChange: () => void saveRuntimeState()
 });
 ptyManager.restoreState(runtimeState.runner);
-topicHarness = new TopicHarness();
+topicHarness = new TopicHarness({
+  onChange: () => void saveRuntimeState()
+});
 topicHarness.restoreState(runtimeState.topics);
 const shellManager = new ShellManager({
   config
@@ -141,6 +143,7 @@ registerHandlers({
   skills,
   skillRegistry,
   scheduler,
+  topicHarness,
   fileUploads,
   adminActions: {
     restart: restartBotProcess
