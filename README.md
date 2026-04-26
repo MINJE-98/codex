@@ -45,6 +45,7 @@ cp .env.example .env
 BOT_TOKEN=<telegram-bot-token>
 ALLOWED_USER_IDS=123456789
 STATE_FILE=.codex-telegram-claws-state.json
+CODEX_HOME=/Users/home/.codexclaw-codex
 WORKSPACE_ROOT=.
 CODEX_WORKDIR=.
 CODEX_BACKEND=sdk
@@ -93,6 +94,7 @@ For agent-oriented setup, see [SKILL.md](SKILL.md).
 - `npm run healthcheck:strict` - stricter production-oriented health check
 - `npm run healthcheck:live` - live Codex + Telegram probe against the configured backend and bot token
 - `npm run telegram:smoke` - live Telegram API smoke test when a real bot token is available
+- `npm run service:user:install` - install/update the bot as the current user's macOS LaunchAgent
 - `npm run service:root:install` - install the bot as a root macOS LaunchDaemon
 - `npm run service:root:uninstall` - remove the root LaunchDaemon and restore the user LaunchAgent when present
 
@@ -440,6 +442,22 @@ Release references:
 
 ## Operations
 
+### Dedicated Codex Home
+
+CodexClaw should use a Codex home that is separate from your interactive terminal Codex. The local CLI can keep using `~/.codex`; the bot service defaults to:
+
+```text
+/Users/home/.codexclaw-codex
+```
+
+This prevents Telegram sessions, SDK thread ids, skills, and runtime config from mixing with the Codex state you use directly in a shell. To install or refresh the user LaunchAgent with this default:
+
+```bash
+npm run service:user:install
+```
+
+Set `CODEX_HOME=/path/to/codex-home` only when you intentionally want to override the dedicated default.
+
 ### Root LaunchDaemon Mode
 
 The default local service runs as a user LaunchAgent. To run every bot action with root privileges on macOS, install the root LaunchDaemon:
@@ -448,7 +466,7 @@ The default local service runs as a user LaunchAgent. To run every bot action wi
 npm run service:root:install
 ```
 
-This writes `/Library/LaunchDaemons/com.codexclaw.bot.plist`, stops the user LaunchAgent with the same label, and starts `com.codexclaw.bot` in the `system` launchd domain as `root`. It keeps `HOME=/Users/home` and `CODEX_HOME=/Users/home/.codex` so existing `.codex` skills and local repo configuration still resolve.
+This writes `/Library/LaunchDaemons/com.codexclaw.bot.plist`, stops the user LaunchAgent with the same label, and starts `com.codexclaw.bot` in the `system` launchd domain as `root`. It keeps `HOME=/Users/home` and defaults `CODEX_HOME=/Users/home/.codexclaw-codex` so bot-owned Codex state stays separate from your interactive `~/.codex` state.
 
 Rollback:
 

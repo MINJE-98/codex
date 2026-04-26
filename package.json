@@ -18,6 +18,7 @@
     "healthcheck:strict": "tsx scripts/healthcheck.ts --strict",
     "healthcheck:live": "tsx scripts/healthcheck.ts --codex-live --telegram-live",
     "telegram:smoke": "tsx scripts/telegramSmoke.ts",
+    "service:user:install": "bash scripts/install-user-launchagent.sh",
     "service:root:install": "bash scripts/install-root-launchdaemon.sh",
     "service:root:uninstall": "bash scripts/uninstall-root-launchdaemon.sh",
     "ci": "npm run check && npm run lint && npm run format:check && npm test && npm run healthcheck",

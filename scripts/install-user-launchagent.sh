@@ -9,27 +9,16 @@ NODE_BIN="${NODE_BIN:-/opt/homebrew/bin/node}"
 TSX_CLI="${TSX_CLI:-${REPO_DIR}/node_modules/tsx/dist/cli.mjs}"
 ENTRYPOINT="${ENTRYPOINT:-${REPO_DIR}/src/index.ts}"
 OWNER_HOME="${CODEXCLAW_HOME:-/Users/home}"
-OWNER_UID="${OWNER_UID:-${SUDO_UID:-501}}"
+OWNER_UID="${OWNER_UID:-$(id -u)}"
 CODEX_HOME_VALUE="${CODEX_HOME:-${OWNER_HOME}/.codexclaw-codex}"
-PLIST="/Library/LaunchDaemons/${LABEL}.plist"
-AGENT_PLIST="${OWNER_HOME}/Library/LaunchAgents/${LABEL}.plist"
+PLIST_DIR="${OWNER_HOME}/Library/LaunchAgents"
+PLIST="${PLIST_DIR}/${LABEL}.plist"
 TMP_PLIST="$(mktemp)"
 
 cleanup() {
   rm -f "${TMP_PLIST}"
 }
 trap cleanup EXIT
-
-if [[ "${EUID}" -ne 0 ]]; then
-  exec sudo \
-    CODEXCLAW_HOME="${OWNER_HOME}" \
-    CODEX_HOME="${CODEX_HOME_VALUE}" \
-    NODE_BIN="${NODE_BIN}" \
-    TSX_CLI="${TSX_CLI}" \
-    ENTRYPOINT="${ENTRYPOINT}" \
-    OWNER_UID="${OWNER_UID}" \
-    "$0" "$@"
-fi
 
 if [[ ! -x "${NODE_BIN}" ]]; then
   echo "Node binary is not executable: ${NODE_BIN}" >&2
@@ -47,23 +36,21 @@ if [[ ! -f "${ENTRYPOINT}" ]]; then
   exit 1
 fi
 
-stop_label() {
+stop_agent_label() {
   local label="$1"
-  local plist="/Library/LaunchDaemons/${label}.plist"
-  local agent_plist="${OWNER_HOME}/Library/LaunchAgents/${label}.plist"
+  local agent_plist="${PLIST_DIR}/${label}.plist"
 
   /bin/launchctl bootout "gui/${OWNER_UID}" "${agent_plist}" 2>/dev/null || true
-  /bin/launchctl bootout "system/${label}" 2>/dev/null || true
-  /bin/launchctl bootout system "${plist}" 2>/dev/null || true
+  /bin/launchctl bootout "gui/${OWNER_UID}/${label}" 2>/dev/null || true
 }
 
 for legacy_label in "${LEGACY_LABELS[@]}"; do
-  stop_label "${legacy_label}"
+  stop_agent_label "${legacy_label}"
 done
 
-/bin/launchctl bootout "gui/${OWNER_UID}" "${AGENT_PLIST}" 2>/dev/null || true
-/bin/launchctl bootout "system/${LABEL}" 2>/dev/null || true
-/bin/launchctl bootout system "${PLIST}" 2>/dev/null || true
+stop_agent_label "${LABEL}"
+/bin/mkdir -p "${PLIST_DIR}"
+/bin/mkdir -p "${CODEX_HOME_VALUE}"
 
 /bin/cat >"${TMP_PLIST}" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -73,10 +60,6 @@ done
 <dict>
   <key>Label</key>
   <string>${LABEL}</string>
-  <key>UserName</key>
-  <string>root</string>
-  <key>GroupName</key>
-  <string>wheel</string>
   <key>ProgramArguments</key>
   <array>
     <string>${NODE_BIN}</string>
@@ -106,12 +89,10 @@ done
 </plist>
 PLIST
 
-/usr/sbin/chown root:wheel "${TMP_PLIST}"
-/bin/chmod 0644 "${TMP_PLIST}"
-/usr/bin/install -m 0644 -o root -g wheel "${TMP_PLIST}" "${PLIST}"
-/bin/launchctl bootstrap system "${PLIST}"
-/bin/launchctl enable "system/${LABEL}"
-/bin/launchctl kickstart -k "system/${LABEL}"
+/usr/bin/install -m 0644 "${TMP_PLIST}" "${PLIST}"
+/bin/launchctl bootstrap "gui/${OWNER_UID}" "${PLIST}"
+/bin/launchctl enable "gui/${OWNER_UID}/${LABEL}"
+/bin/launchctl kickstart -k "gui/${OWNER_UID}/${LABEL}"
 
-echo "Installed ${LABEL} as a root LaunchDaemon."
-/bin/launchctl print "system/${LABEL}" | /usr/bin/sed -n '1,80p'
+echo "Installed ${LABEL} as a user LaunchAgent."
+/bin/launchctl print "gui/${OWNER_UID}/${LABEL}" | /usr/bin/sed -n '1,80p'
