@@ -20,7 +20,11 @@ import { escapeMarkdownV2, splitTelegramMessage } from "./formatter.js";
 import type { Scheduler } from "../cron/scheduler.js";
 import { toErrorMessage } from "../lib/errors.js";
 import type { Router } from "../orchestrator/router.js";
-import type { PtyManager, PtyManagerStatus } from "../runner/ptyManager.js";
+import type {
+  PtyManager,
+  PtyManagerStatus,
+  SendPromptOptions
+} from "../runner/ptyManager.js";
 import type {
   ShellExecutionResult,
   ShellManager
@@ -692,18 +696,38 @@ export function registerHandlers({
     locale: Locale,
     text: string,
     {
-      includeReplyContext = true
+      includeReplyContext = true,
+      topic = null
     }: {
       includeReplyContext?: boolean;
+      topic?: TopicContextSnapshot | null;
     } = {}
   ): Promise<void> => {
+    const workdir = workdirOf(ctx);
     const route = await router.routeMessage(text, {
       chatId: ctx.chat.id
     });
     if (route.target === "pty") {
+      const sendOptions = topic
+        ? ({
+            conversationSessionId: topic.codexThreadId || null,
+            trackProjectConversation: false,
+            onSessionId: (sessionId: string) => {
+              topicHarness.recordThreadId(
+                ctx.chat.id,
+                workdir,
+                topic.id,
+                sessionId
+              );
+            }
+          } satisfies SendPromptOptions)
+        : undefined;
       const result = await ptyManager.sendPrompt(
         ctx,
-        includeReplyContext ? withReplyContext(ctx, route.prompt) : route.prompt
+        includeReplyContext
+          ? withReplyContext(ctx, route.prompt)
+          : route.prompt,
+        sendOptions
       );
       await handlePromptResult(ctx, locale, result);
       return;
@@ -721,7 +745,7 @@ export function registerHandlers({
     const result = await skill.execute({
       text: route.payload,
       chatId: ctx.chat.id,
-      workdir: workdirOf(ctx),
+      workdir,
       locale
     });
     await applySkillResult(ctx, result, locale, ptyManager);
@@ -805,7 +829,8 @@ export function registerHandlers({
       const topic = topicHarness.pauseAndSwitch(ctx.chat.id, workdirOf(ctx));
       await sendChunkedMarkdown(ctx, `Switched to: ${formatTopicLine(topic)}`);
       await processRoutedText(ctx, locale, topic.lastUserIntent, {
-        includeReplyContext: false
+        includeReplyContext: false,
+        topic
       });
     } catch (error) {
       await sendChunkedMarkdown(
@@ -824,7 +849,8 @@ export function registerHandlers({
         `Closed current context. Switched to: ${formatTopicLine(topic)}`
       );
       await processRoutedText(ctx, locale, topic.lastUserIntent, {
-        includeReplyContext: false
+        includeReplyContext: false,
+        topic
       });
     } catch (error) {
       await sendChunkedMarkdown(
@@ -1483,7 +1509,8 @@ export function registerHandlers({
           `Switched to: ${formatTopicLine(topic)}`
         );
         await processRoutedText(ctx, locale, topic.lastUserIntent, {
-          includeReplyContext: false
+          includeReplyContext: false,
+          topic
         });
         return;
       }
@@ -1495,7 +1522,8 @@ export function registerHandlers({
           `Closed current context. Switched to: ${formatTopicLine(topic)}`
         );
         await processRoutedText(ctx, locale, topic.lastUserIntent, {
-          includeReplyContext: false
+          includeReplyContext: false,
+          topic
         });
         return;
       }
@@ -1662,7 +1690,9 @@ export function registerHandlers({
         return;
       }
 
-      await processRoutedText(ctx, locale, text);
+      await processRoutedText(ctx, locale, text, {
+        topic: gate.topic
+      });
     } catch (error) {
       await sendChunkedMarkdown(
         ctx,

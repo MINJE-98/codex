@@ -766,6 +766,106 @@ test("pty manager stores SDK thread ids per project and resumes them", async () 
   assert.match(resumedMessage.text, /Project A resumed/);
 });
 
+test("pty manager can force a fresh SDK thread without overwriting project context", async () => {
+  const calls: FakeCall[] = [];
+  const projectThreadId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+  const topicThreadId = "dddddddd-dddd-dddd-dddd-dddddddddddd";
+  let observedSessionId = "";
+  const manager = createManager({
+    backend: "sdk",
+    codexClientFactory: createFakeCodexClient(
+      [
+        {
+          initialId: topicThreadId,
+          events: async function* () {
+            yield {
+              type: "thread.started",
+              thread_id: topicThreadId
+            };
+            yield {
+              type: "item.completed",
+              item: {
+                id: "item-1",
+                type: "agent_message",
+                text: "Topic started."
+              }
+            };
+          }
+        }
+      ],
+      calls
+    )
+  });
+  manager.restoreState({
+    chats: {
+      "9": {
+        preferredModel: null,
+        language: "en",
+        verboseOutput: false,
+        currentWorkdir: ".",
+        recentWorkdirs: ["."],
+        projects: {
+          ".": {
+            lastSessionId: projectThreadId,
+            lastMode: "sdk",
+            lastExitCode: 0,
+            lastExitSignal: null,
+            lastWorkflowPhase: null
+          }
+        }
+      }
+    }
+  });
+
+  await manager.sendPrompt({ chat: { id: 9 } }, "start topic", {
+    conversationSessionId: null,
+    trackProjectConversation: false,
+    onSessionId: (sessionId) => {
+      observedSessionId = sessionId;
+    }
+  });
+  await waitFor(() => !manager.getStatus(9).active);
+
+  assert.equal(calls[0].action, "start");
+  assert.equal(observedSessionId, topicThreadId);
+  assert.equal(manager.getStatus(9).projectSessionId, projectThreadId);
+});
+
+test("pty manager resumes an explicit SDK topic thread", async () => {
+  const calls: FakeCall[] = [];
+  const topicThreadId = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
+  const manager = createManager({
+    backend: "sdk",
+    codexClientFactory: createFakeCodexClient(
+      [
+        {
+          events: async function* () {
+            yield {
+              type: "item.completed",
+              item: {
+                id: "item-1",
+                type: "agent_message",
+                text: "Topic resumed."
+              }
+            };
+          }
+        }
+      ],
+      calls
+    )
+  });
+
+  await manager.sendPrompt({ chat: { id: 9 } }, "continue topic", {
+    conversationSessionId: topicThreadId,
+    trackProjectConversation: false
+  });
+  await waitFor(() => !manager.getStatus(9).active);
+
+  assert.equal(calls[0].action, "resume");
+  assert.equal(calls[0].id, topicThreadId);
+  assert.equal(manager.getStatus(9).projectSessionId, null);
+});
+
 test("pty manager starts a fresh SDK thread when a saved thread is missing", async () => {
   const calls: FakeCall[] = [];
   const sentMessages: SentMessageRecord[] = [];

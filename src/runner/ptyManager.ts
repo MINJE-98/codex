@@ -115,11 +115,13 @@ interface RunnerSession {
   interrupt: (() => void) | null;
   close: (() => void) | null;
   workflowPhase: WorkflowPhase | null;
+  onSessionId: ((sessionId: string) => void) | null;
 }
 
 interface SessionOptions {
   workdir?: string;
   resumeSessionId?: string;
+  onSessionId?: (sessionId: string) => void;
   initialPrompt?: string;
   fullAuto?: boolean;
   extraArgs?: string[];
@@ -127,13 +129,16 @@ interface SessionOptions {
   additionalDirectories?: string[];
 }
 
-interface SendPromptOptions {
+export interface SendPromptOptions {
   forceExec?: boolean;
   fullAuto?: boolean;
   extraArgs?: string[];
   notice?: string;
   allowWorkspaceConflict?: boolean;
   additionalDirectories?: string[];
+  conversationSessionId?: string | null;
+  trackProjectConversation?: boolean;
+  onSessionId?: (sessionId: string) => void;
 }
 
 interface SendPromptContext {
@@ -676,6 +681,7 @@ export class PtyManager {
     if (!sessionId || sessionId === session.sessionId) return;
 
     session.sessionId = sessionId;
+    session.onSessionId?.(sessionId);
     if (!session.trackConversation) return;
 
     const projectState = this.ensureProjectState(
@@ -784,6 +790,18 @@ export class PtyManager {
     }
     if (options.notice) {
       replayOptions.notice = options.notice;
+    }
+    if (options.additionalDirectories?.length) {
+      replayOptions.additionalDirectories = [...options.additionalDirectories];
+    }
+    if ("conversationSessionId" in options) {
+      replayOptions.conversationSessionId = options.conversationSessionId;
+    }
+    if (typeof options.trackProjectConversation === "boolean") {
+      replayOptions.trackProjectConversation = options.trackProjectConversation;
+    }
+    if (options.onSessionId) {
+      replayOptions.onSessionId = options.onSessionId;
     }
 
     state.pendingPrompt = {
@@ -998,7 +1016,7 @@ export class PtyManager {
       mode,
       workdir,
       model: state.preferredModel,
-      sessionId: projectState.lastSessionId || "",
+      sessionId: options.resumeSessionId || projectState.lastSessionId || "",
       trackConversation: options.trackConversation !== false,
       proc: null,
       thread: null,
@@ -1018,7 +1036,8 @@ export class PtyManager {
       write: null,
       interrupt: null,
       close: null,
-      workflowPhase: null
+      workflowPhase: null,
+      onSessionId: options.onSessionId || null
     };
 
     this.sessions.set(key, session);
@@ -1532,6 +1551,20 @@ export class PtyManager {
     }
 
     state.pendingPrompt = null;
+    const hasExplicitConversationSession = "conversationSessionId" in options;
+    const explicitResumeSessionId = hasExplicitConversationSession
+      ? options.conversationSessionId || ""
+      : null;
+    const projectResumeSessionId =
+      options.forceExec || !projectState.lastSessionId
+        ? ""
+        : projectState.lastSessionId;
+    const resumeSessionId = hasExplicitConversationSession
+      ? explicitResumeSessionId || ""
+      : projectResumeSessionId;
+    const trackConversation =
+      options.trackProjectConversation ?? !options.forceExec;
+    const resumed = Boolean(resumeSessionId && !options.forceExec);
 
     if (this.config.runner.backend === "sdk") {
       const running = this.sessions.get(chatId);
@@ -1543,17 +1576,14 @@ export class PtyManager {
         };
       }
 
-      const resumed = Boolean(projectState.lastSessionId && !options.forceExec);
       const session = this.startSdkSessionWithOptions(chatId, prompt, {
         fullAuto: Boolean(options.fullAuto),
         extraArgs: options.extraArgs || [],
         workdir,
         additionalDirectories: options.additionalDirectories || [],
-        resumeSessionId:
-          options.forceExec || !projectState.lastSessionId
-            ? ""
-            : projectState.lastSessionId,
-        trackConversation: !options.forceExec
+        resumeSessionId,
+        trackConversation,
+        onSessionId: options.onSessionId
       });
 
       if (options.notice && this.isVerbose(chatId)) {
@@ -1599,7 +1629,8 @@ export class PtyManager {
         extraArgs: options.extraArgs || [],
         workdir,
         additionalDirectories: options.additionalDirectories || [],
-        trackConversation: false
+        trackConversation: false,
+        onSessionId: options.onSessionId
       });
 
       if (options.notice && this.isVerbose(chatId)) {
@@ -1631,14 +1662,18 @@ export class PtyManager {
 
     let session = this.ensureSession(
       chatId,
-      projectState.lastSessionId
+      resumeSessionId
         ? {
             workdir,
-            resumeSessionId: projectState.lastSessionId,
-            initialPrompt: prompt
+            resumeSessionId,
+            initialPrompt: prompt,
+            trackConversation,
+            onSessionId: options.onSessionId
           }
         : {
-            workdir
+            workdir,
+            trackConversation,
+            onSessionId: options.onSessionId
           }
     );
 
@@ -1648,12 +1683,14 @@ export class PtyManager {
         extraArgs: options.extraArgs || [],
         workdir,
         additionalDirectories: options.additionalDirectories || [],
-        resumeSessionId: projectState.lastSessionId || ""
+        resumeSessionId,
+        trackConversation,
+        onSessionId: options.onSessionId
       });
       if (this.isVerbose(chatId)) {
         await this.bot.telegram.sendMessage(
           chatId,
-          projectState.lastSessionId
+          resumeSessionId
             ? t(this.getLanguage(chatId), "execFallbackResume")
             : t(this.getLanguage(chatId), "execFallbackSingle")
         );
@@ -1662,14 +1699,14 @@ export class PtyManager {
         started: true,
         mode: "exec",
         fallback: true,
-        resumed: Boolean(projectState.lastSessionId)
+        resumed
       };
     }
 
     if (!session.streamMessageIds.length && this.isVerbose(chatId)) {
       const sent = await this.bot.telegram.sendMessage(
         chatId,
-        projectState.lastSessionId
+        resumeSessionId
           ? t(this.getLanguage(chatId), "sessionRestored", {
               project: this.getRelativeWorkdir(chatId),
               mode: session.mode
@@ -1681,7 +1718,7 @@ export class PtyManager {
       session.streamMessageIds.push(sent.message_id);
     }
 
-    if (projectState.lastSessionId) {
+    if (resumeSessionId) {
       return {
         started: true,
         mode: "pty",

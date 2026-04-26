@@ -763,6 +763,80 @@ test("switch command pauses active context and starts pending switch", async () 
   assert.match(routedPrompt, /Find latest OpenAI API changes/);
 });
 
+test("text handler starts durable topics with a fresh topic-scoped Codex thread", async () => {
+  const topicHarness = new TopicHarness();
+  const sendOptions: Array<Record<string, unknown> | undefined> = [];
+  const { bot } = createDependencies({
+    topicHarness,
+    sendPrompt: async (_ctx, _prompt, options) => {
+      sendOptions.push(options);
+      (options?.onSessionId as ((sessionId: string) => void) | undefined)?.(
+        "topic-thread-1"
+      );
+      return {
+        started: true,
+        mode: "sdk"
+      };
+    }
+  });
+  const ctx = createContext("Implement topic harness");
+  const handler = bot.events.get("text");
+
+  if (!handler) {
+    throw new Error("Expected text handler to be registered");
+  }
+
+  await handler(ctx);
+
+  assert.equal(sendOptions.length, 1);
+  assert.equal(sendOptions[0]?.conversationSessionId, null);
+  assert.equal(sendOptions[0]?.trackProjectConversation, false);
+
+  const project = topicHarness.getProject(1, process.cwd());
+  assert.equal(project.activeTopicId, "T001");
+  assert.equal(project.topics[0].codexThreadId, "topic-thread-1");
+});
+
+test("text handler resumes the active topic Codex thread", async () => {
+  const topicHarness = new TopicHarness();
+  topicHarness.evaluateIncoming({
+    chatId: 1,
+    workdir: process.cwd(),
+    text: "Implement topic harness",
+    classification: classifyTopicRequest("Implement topic harness")
+  });
+  topicHarness.recordThreadId(
+    1,
+    process.cwd(),
+    "T001",
+    "topic-thread-existing"
+  );
+
+  const sendOptions: Array<Record<string, unknown> | undefined> = [];
+  const { bot } = createDependencies({
+    topicHarness,
+    sendPrompt: async (_ctx, _prompt, options) => {
+      sendOptions.push(options);
+      return {
+        started: true,
+        mode: "sdk"
+      };
+    }
+  });
+  const ctx = createContext("Fix topic harness tests");
+  const handler = bot.events.get("text");
+
+  if (!handler) {
+    throw new Error("Expected text handler to be registered");
+  }
+
+  await handler(ctx);
+
+  assert.equal(sendOptions.length, 1);
+  assert.equal(sendOptions[0]?.conversationSessionId, "topic-thread-existing");
+  assert.equal(sendOptions[0]?.trackProjectConversation, false);
+});
+
 test("skill list explains that superpowers is internal and not toggleable", async () => {
   const { bot } = createDependencies();
   const ctx = createContext("/skill");
