@@ -4,6 +4,7 @@ import { toErrorMessage } from "./lib/errors.js";
 import type { McpClientSnapshot } from "./orchestrator/mcpClient.js";
 import type { PtyManagerSnapshot } from "./runner/ptyManager.js";
 import type { SkillRegistrySnapshot } from "./orchestrator/skillRegistry.js";
+import type { TopicHarnessSnapshot } from "./harness/topicHarness.js";
 
 export interface RuntimeStateSnapshot {
   version: number;
@@ -11,6 +12,7 @@ export interface RuntimeStateSnapshot {
   mcp: McpClientSnapshot;
   runner: PtyManagerSnapshot;
   skills: SkillRegistrySnapshot;
+  topics: TopicHarnessSnapshot;
 }
 
 type PersistedSnapshot = Partial<RuntimeStateSnapshot>;
@@ -25,6 +27,9 @@ function defaultState(): RuntimeStateSnapshot {
       chats: {}
     },
     skills: {
+      chats: {}
+    },
+    topics: {
       chats: {}
     }
   };
@@ -57,6 +62,10 @@ export class RuntimeStateStore {
         skills: {
           ...defaultState().skills,
           ...(parsed?.skills || {})
+        },
+        topics: {
+          ...defaultState().topics,
+          ...(parsed?.topics || {})
         }
       };
     } catch (error) {

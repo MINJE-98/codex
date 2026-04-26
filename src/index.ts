@@ -20,6 +20,7 @@ import { PtyManager } from "./runner/ptyManager.js";
 import { ShellManager } from "./runner/shellManager.js";
 import { DevServerManager } from "./runner/devServerManager.js";
 import { Scheduler } from "./cron/scheduler.js";
+import { TopicHarness } from "./harness/topicHarness.js";
 import { toErrorMessage } from "./lib/errors.js";
 import { createTelegramApiAgent } from "./lib/telegramApi.js";
 import { shouldSpawnDetachedRestart } from "./restartPolicy.js";
@@ -40,13 +41,15 @@ const stateStore = new RuntimeStateStore({ config });
 let mcpClient: McpClient | null = null;
 let skillRegistry: SkillRegistry | null = null;
 let ptyManager: PtyManager | null = null;
+let topicHarness: TopicHarness | null = null;
 
 async function saveRuntimeState(): Promise<void> {
-  if (!mcpClient || !skillRegistry || !ptyManager) return;
+  if (!mcpClient || !skillRegistry || !ptyManager || !topicHarness) return;
   await stateStore.save({
     mcp: mcpClient.exportState(),
     skills: skillRegistry.exportState(),
-    runner: ptyManager.exportState()
+    runner: ptyManager.exportState(),
+    topics: topicHarness.exportState()
   });
 }
 
@@ -112,6 +115,8 @@ ptyManager = new PtyManager({
   onChange: () => void saveRuntimeState()
 });
 ptyManager.restoreState(runtimeState.runner);
+topicHarness = new TopicHarness();
+topicHarness.restoreState(runtimeState.topics);
 const shellManager = new ShellManager({
   config
 });
