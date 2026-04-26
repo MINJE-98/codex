@@ -124,6 +124,7 @@ interface SessionOptions {
   fullAuto?: boolean;
   extraArgs?: string[];
   trackConversation?: boolean;
+  additionalDirectories?: string[];
 }
 
 interface SendPromptOptions {
@@ -132,6 +133,7 @@ interface SendPromptOptions {
   extraArgs?: string[];
   notice?: string;
   allowWorkspaceConflict?: boolean;
+  additionalDirectories?: string[];
 }
 
 interface SendPromptContext {
@@ -1264,7 +1266,11 @@ export class PtyManager {
         session.chatId,
         session.workdir,
         {
-          approvalPolicy: options.fullAuto ? "never" : undefined
+          approvalPolicy: options.fullAuto ? "never" : undefined,
+          additionalDirectories: [
+            ...this.config.runner.sdkThreadOptions.additionalDirectories,
+            ...(options.additionalDirectories || [])
+          ]
         }
       );
       const codex = this.getCodexClient();
@@ -1483,6 +1489,7 @@ export class PtyManager {
         fullAuto: Boolean(options.fullAuto),
         extraArgs: options.extraArgs || [],
         workdir,
+        additionalDirectories: options.additionalDirectories || [],
         resumeSessionId:
           options.forceExec || !projectState.lastSessionId
             ? ""
@@ -1532,6 +1539,7 @@ export class PtyManager {
         fullAuto: Boolean(options.fullAuto),
         extraArgs: options.extraArgs || [],
         workdir,
+        additionalDirectories: options.additionalDirectories || [],
         trackConversation: false
       });
 
@@ -1580,6 +1588,7 @@ export class PtyManager {
         fullAuto: Boolean(options.fullAuto),
         extraArgs: options.extraArgs || [],
         workdir,
+        additionalDirectories: options.additionalDirectories || [],
         resumeSessionId: projectState.lastSessionId || ""
       });
       if (this.isVerbose(chatId)) {

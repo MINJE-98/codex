@@ -22,6 +22,19 @@ interface TestContext {
   };
   message: {
     text: string;
+    caption?: string;
+    document?: {
+      file_id: string;
+      file_name?: string;
+      mime_type?: string;
+      file_size?: number;
+    };
+    photo?: Array<{
+      file_id: string;
+      file_size?: number;
+      width?: number;
+      height?: number;
+    }>;
     reply_to_message?: {
       text?: string;
       caption?: string;
@@ -140,7 +153,11 @@ async function createCodexSkill(name: string): Promise<string> {
 
 function createDependencies(
   overrides: {
-    sendPrompt?: (ctx: TestContext, prompt: string) => Promise<unknown>;
+    sendPrompt?: (
+      ctx: TestContext,
+      prompt: string,
+      options?: Record<string, unknown>
+    ) => Promise<unknown>;
     continuePendingPrompt?: () => Promise<unknown>;
     routeMessage?: (text: string) => Promise<unknown>;
     githubExecute?: () => Promise<unknown>;
@@ -159,6 +176,17 @@ function createDependencies(
     restart?: () => Promise<void>;
     syncTelegramCommands?: () => Promise<boolean>;
     codexSkillRoots?: string[];
+    saveUpload?: (
+      ctx: TestContext,
+      kind: "document" | "image"
+    ) => Promise<{
+      filePath: string;
+      originalName: string;
+      mimeType: string;
+      size: number;
+      kind: "document" | "image";
+      additionalDirectories: string[];
+    }>;
   } = {}
 ) {
   const bot = new FakeBot();
@@ -302,6 +330,18 @@ function createDependencies(
     scheduler: {
       triggerDailySummaryNow: async () => {}
     } as any,
+    fileUploads: {
+      save:
+        overrides.saveUpload ||
+        (async () => ({
+          filePath: "/tmp/upload.txt",
+          originalName: "upload.txt",
+          mimeType: "text/plain",
+          size: 12,
+          kind: "document" as const,
+          additionalDirectories: ["/tmp"]
+        }))
+    },
     adminActions: overrides.restart
       ? {
           restart: overrides.restart
@@ -312,6 +352,53 @@ function createDependencies(
   });
 
   return { bot };
+}
+
+function createDocumentContext(
+  caption: string,
+  chatId = 1,
+  options: Parameters<typeof createContext>[2] & {
+    fileId?: string;
+    fileName?: string;
+    mimeType?: string;
+    fileSize?: number;
+  } = {}
+): TestContext {
+  const ctx = createContext("", chatId, options);
+  ctx.message.caption = caption;
+  ctx.message.document = {
+    file_id: options.fileId || "file-1",
+    file_name: options.fileName,
+    mime_type: options.mimeType,
+    file_size: options.fileSize
+  };
+  return ctx;
+}
+
+function createPhotoContext(
+  caption: string,
+  chatId = 1,
+  options: Parameters<typeof createContext>[2] & {
+    photos?: TestContext["message"]["photo"];
+  } = {}
+): TestContext {
+  const ctx = createContext("", chatId, options);
+  ctx.message.caption = caption;
+  ctx.message.photo = options.photos || [
+    {
+      file_id: "photo-small",
+      file_size: 32,
+      width: 90,
+      height: 90
+    },
+    {
+      file_id: "photo-large",
+      file_size: 1024,
+      width: 1280,
+      height: 720
+    }
+  ];
+  return ctx;
 }
 
 test("dev start reports the selected frontend script", async () => {
@@ -734,6 +821,134 @@ test("text handler includes replied message text in Codex prompt", async () => {
   );
   assert.match(prompts[0], /Money Printer health check failed: HTTP 500/);
   assert.match(prompts[0], /User message:\n왜 이렇게 판단했어\?/);
+});
+
+test("document handler saves upload and sends file path prompt to Codex", async () => {
+  const prompts: string[] = [];
+  const options: unknown[] = [];
+  const { bot } = createDependencies({
+    sendPrompt: async (_ctx, prompt, sendOptions) => {
+      prompts.push(prompt);
+      options.push(sendOptions);
+      return {
+        started: true,
+        mode: "sdk"
+      };
+    },
+    saveUpload: async () => ({
+      filePath: "/tmp/codexclaw-uploads/notes.md",
+      originalName: "notes.md",
+      mimeType: "text/markdown",
+      size: 128,
+      kind: "document",
+      additionalDirectories: ["/tmp/codexclaw-uploads"]
+    })
+  });
+  const ctx = createDocumentContext("요약해줘", -100, {
+    chatType: "group",
+    botUsername: "CodexClawBot",
+    replyToBot: true,
+    fileName: "notes.md",
+    mimeType: "text/markdown",
+    fileSize: 128
+  });
+  const handler = bot.events.get("document");
+
+  if (!handler) {
+    throw new Error("Expected document handler to be registered");
+  }
+
+  await handler(ctx);
+
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0], /The user uploaded a Telegram file/);
+  assert.match(prompts[0], /\/tmp\/codexclaw-uploads\/notes\.md/);
+  assert.match(prompts[0], /Original name:\nnotes\.md/);
+  assert.match(prompts[0], /User message:\n요약해줘/);
+  assert.deepEqual(
+    (options[0] as { additionalDirectories?: string[] }).additionalDirectories,
+    ["/tmp/codexclaw-uploads"]
+  );
+});
+
+test("document handler accepts group caption mentions and strips the mention", async () => {
+  const prompts: string[] = [];
+  const { bot } = createDependencies({
+    sendPrompt: async (_ctx, prompt) => {
+      prompts.push(prompt);
+      return {
+        started: true,
+        mode: "sdk"
+      };
+    },
+    saveUpload: async () => ({
+      filePath: "/tmp/codexclaw-uploads/notes.md",
+      originalName: "notes.md",
+      mimeType: "text/markdown",
+      size: 128,
+      kind: "document",
+      additionalDirectories: ["/tmp/codexclaw-uploads"]
+    })
+  });
+  const ctx = createDocumentContext("@CodexClawBot 분석해줘", -100, {
+    chatType: "group",
+    botUsername: "CodexClawBot",
+    fileName: "notes.md",
+    mimeType: "text/markdown",
+    fileSize: 128
+  });
+  const handler = bot.events.get("document");
+
+  if (!handler) {
+    throw new Error("Expected document handler to be registered");
+  }
+
+  await handler(ctx);
+
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0], /User message:\n분석해줘/);
+  assert.doesNotMatch(prompts[0], /@CodexClawBot/);
+});
+
+test("photo handler saves image and uses default prompt when caption is empty", async () => {
+  const prompts: string[] = [];
+  const uploads: Array<"document" | "image"> = [];
+  const { bot } = createDependencies({
+    sendPrompt: async (_ctx, prompt) => {
+      prompts.push(prompt);
+      return {
+        started: true,
+        mode: "sdk"
+      };
+    },
+    saveUpload: async (_ctx, kind) => {
+      uploads.push(kind);
+      return {
+        filePath: "/tmp/codexclaw-uploads/photo.jpg",
+        originalName: "telegram-photo.jpg",
+        mimeType: "image/jpeg",
+        size: 1024,
+        kind,
+        additionalDirectories: ["/tmp/codexclaw-uploads"]
+      };
+    }
+  });
+  const ctx = createPhotoContext("", 1);
+  const handler = bot.events.get("photo");
+
+  if (!handler) {
+    throw new Error("Expected photo handler to be registered");
+  }
+
+  await handler(ctx);
+
+  assert.deepEqual(uploads, ["image"]);
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0], /\/tmp\/codexclaw-uploads\/photo\.jpg/);
+  assert.match(
+    prompts[0],
+    /Please inspect this uploaded file and summarize the relevant details\./
+  );
 });
 
 test("command handlers ignore unmentioned group commands", async () => {

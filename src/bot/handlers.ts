@@ -7,6 +7,10 @@ import {
 } from "./commandUtils.js";
 import { resolveCodexSkillCommand } from "./telegramCommands.js";
 import {
+  buildTelegramUploadPrompt,
+  type TelegramFileUploadManagerLike
+} from "./fileUploads.js";
+import {
   normalizeLanguage,
   SUPPORTED_LANGUAGES,
   t,
@@ -39,6 +43,7 @@ interface RegisterHandlersOptions {
   skills: Record<string, any>;
   skillRegistry: SkillRegistry;
   scheduler: Scheduler;
+  fileUploads: TelegramFileUploadManagerLike;
   adminActions?: {
     restart?: () => Promise<void>;
   };
@@ -94,28 +99,68 @@ function isReplyToBot(ctx: any, username: string): boolean {
   );
 }
 
+function getMentionSource(ctx: any): {
+  field: "text" | "caption" | null;
+  text: string;
+} {
+  if (typeof ctx.message?.text === "string" && ctx.message.text) {
+    return {
+      field: "text",
+      text: ctx.message.text
+    };
+  }
+
+  if (typeof ctx.message?.caption === "string" && ctx.message.caption) {
+    return {
+      field: "caption",
+      text: ctx.message.caption
+    };
+  }
+
+  if (typeof ctx.message?.text === "string") {
+    return {
+      field: "text",
+      text: ctx.message.text
+    };
+  }
+
+  if (typeof ctx.message?.caption === "string") {
+    return {
+      field: "caption",
+      text: ctx.message.caption
+    };
+  }
+
+  return {
+    field: null,
+    text: ""
+  };
+}
+
 function normalizeMentionedText(ctx: any): {
   allowed: boolean;
   text: string;
+  field: "text" | "caption" | null;
 } {
-  const text = String(ctx.message?.text || "");
+  const { field, text } = getMentionSource(ctx);
   if (!requiresMention(ctx)) {
-    return { allowed: true, text };
+    return { allowed: true, text, field };
   }
 
   const username = getBotUsername(ctx);
   if (!username) {
-    return { allowed: false, text };
+    return { allowed: false, text, field };
   }
 
   const mentionPattern = `@${escapeRegExp(username)}(?![A-Za-z0-9_])`;
   if (!new RegExp(mentionPattern, "i").test(text)) {
-    return { allowed: isReplyToBot(ctx, username), text };
+    return { allowed: isReplyToBot(ctx, username), text, field };
   }
 
   return {
     allowed: true,
-    text: text.replace(new RegExp(mentionPattern, "gi"), "").trim()
+    text: text.replace(new RegExp(mentionPattern, "gi"), "").trim(),
+    field
   };
 }
 
@@ -124,17 +169,21 @@ function withMentionGate(handler: Handler): Handler {
     const result = normalizeMentionedText(ctx);
     if (!result.allowed) return;
 
-    if (!ctx.message || ctx.message.text === result.text) {
+    if (
+      !ctx.message ||
+      !result.field ||
+      ctx.message[result.field] === result.text
+    ) {
       await handler(ctx);
       return;
     }
 
-    const originalText = ctx.message.text;
-    ctx.message.text = result.text;
+    const originalText = ctx.message[result.field];
+    ctx.message[result.field] = result.text;
     try {
       await handler(ctx);
     } finally {
-      ctx.message.text = originalText;
+      ctx.message[result.field] = originalText;
     }
   };
 }
@@ -158,6 +207,16 @@ function withReplyContext(ctx: any, prompt: string): string {
     "User message:",
     prompt
   ].join("\n");
+}
+
+function getMessageInstruction(ctx: any): string {
+  const caption = String(ctx.message?.caption || "").trim();
+  if (caption) return caption;
+
+  const text = String(ctx.message?.text || "").trim();
+  if (text) return text;
+
+  return "Please inspect this uploaded file and summarize the relevant details.";
 }
 
 async function sendChunkedMarkdown(
@@ -504,6 +563,7 @@ export function registerHandlers({
   skills,
   skillRegistry,
   scheduler,
+  fileUploads,
   adminActions,
   syncTelegramCommands,
   codexSkillRoots
@@ -560,6 +620,27 @@ export function registerHandlers({
   const command = (name: string, handler: Handler) =>
     bot.command(name, withMentionGate(handler));
   const text = (handler: Handler) => bot.on("text", withMentionGate(handler));
+  const uploadedFile = (kind: "document" | "image") =>
+    withMentionGate(async (ctx: any) => {
+      const locale = localeOf(ctx.chat.id);
+
+      try {
+        const upload = await fileUploads.save(ctx, kind);
+        const result = await ptyManager.sendPrompt(
+          ctx,
+          buildTelegramUploadPrompt(upload, getMessageInstruction(ctx)),
+          {
+            additionalDirectories: upload.additionalDirectories
+          }
+        );
+        await handlePromptResult(ctx, locale, result);
+      } catch (error) {
+        await sendChunkedMarkdown(
+          ctx,
+          t(locale, "processingFailed", { error: toErrorMessage(error) })
+        );
+      }
+    });
 
   start(async (ctx: any) => {
     await sendDashboard(ctx, localeOf(ctx.chat.id), {
@@ -1172,6 +1253,9 @@ export function registerHandlers({
       );
     }
   });
+
+  bot.on("document", uploadedFile("document"));
+  bot.on("photo", uploadedFile("image"));
 
   bot.on("callback_query", async (ctx: any) => {
     const locale = localeOf(ctx.chat.id);

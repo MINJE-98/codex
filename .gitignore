@@ -5,3 +5,4 @@ npm-debug.log*
 .codex-telegram-claws-state.json
 bot.log
 bot.err.log
+.telegram-uploads/

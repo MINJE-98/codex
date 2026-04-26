@@ -1,10 +1,12 @@
 import { spawn } from "node:child_process";
+import path from "node:path";
 import process from "node:process";
 import { Telegraf } from "telegraf";
 import { loadConfig } from "./config.js";
 import { RuntimeStateStore } from "./runtimeStateStore.js";
 import { createAuthMiddleware } from "./bot/middleware.js";
 import { registerHandlers } from "./bot/handlers.js";
+import { TelegramFileUploadManager } from "./bot/fileUploads.js";
 import {
   defaultCodexSkillRoots,
   syncTelegramCommands
@@ -114,6 +116,10 @@ const shellManager = new ShellManager({
   config
 });
 const devServerManager = new DevServerManager();
+const fileUploads = new TelegramFileUploadManager({
+  uploadRoot: path.join(process.cwd(), ".telegram-uploads"),
+  proxyUrl: config.telegram.proxyUrl
+});
 
 const scheduler = new Scheduler({
   bot,
@@ -130,6 +136,7 @@ registerHandlers({
   skills,
   skillRegistry,
   scheduler,
+  fileUploads,
   adminActions: {
     restart: restartBotProcess
   },
