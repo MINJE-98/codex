@@ -222,6 +222,7 @@ Telegram adaptation notes:
 
 - In private DMs, plain text messages behave like a normal Codex conversation turn
 - In group chats, the bot stays silent unless the message mentions the bot username, such as `@YourBot fix this` or `/status@YourBot`
+- CodexClaw is a transport bridge; response policy, topic-switch judgment, working style, and prompt behavior come from the configured Codex home
 - On startup, the bot publishes its Telegram command menu with Bot API `setMyCommands`
 - Codex skills discovered under `$CODEX_HOME/skills` (default `~/.codex/skills`) and repo `.codex/skills/**/SKILL.md` are exposed as safe aliases like `/s_test_driven_development <task>`
 - `/exec` runs a one-off Codex task and does not overwrite the saved project conversation slot
@@ -457,6 +458,8 @@ npm run service:user:install
 ```
 
 Set `CODEX_HOME=/path/to/codex-home` only when you intentionally want to override the dedicated default.
+
+CodexClaw does not hardcode response policy in the repository. If you want Telegram-specific behavior, put it in that Codex home, for example by setting `developer_instructions` in `$CODEX_HOME/config.toml` or by installing skills under `$CODEX_HOME/skills`.
 
 ### Root LaunchDaemon Mode
 

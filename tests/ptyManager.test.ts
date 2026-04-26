@@ -766,28 +766,28 @@ test("pty manager stores SDK thread ids per project and resumes them", async () 
   assert.match(resumedMessage.text, /Project A resumed/);
 });
 
-test("pty manager can force a fresh SDK thread without overwriting project context", async () => {
+test("pty manager can force a fresh explicit SDK thread without overwriting project context", async () => {
   const calls: FakeCall[] = [];
   const projectThreadId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
-  const topicThreadId = "dddddddd-dddd-dddd-dddd-dddddddddddd";
+  const explicitThreadId = "dddddddd-dddd-dddd-dddd-dddddddddddd";
   let observedSessionId = "";
   const manager = createManager({
     backend: "sdk",
     codexClientFactory: createFakeCodexClient(
       [
         {
-          initialId: topicThreadId,
+          initialId: explicitThreadId,
           events: async function* () {
             yield {
               type: "thread.started",
-              thread_id: topicThreadId
+              thread_id: explicitThreadId
             };
             yield {
               type: "item.completed",
               item: {
                 id: "item-1",
                 type: "agent_message",
-                text: "Topic started."
+                text: "Explicit thread started."
               }
             };
           }
@@ -817,7 +817,7 @@ test("pty manager can force a fresh SDK thread without overwriting project conte
     }
   });
 
-  await manager.sendPrompt({ chat: { id: 9 } }, "start topic", {
+  await manager.sendPrompt({ chat: { id: 9 } }, "start explicit thread", {
     conversationSessionId: null,
     trackProjectConversation: false,
     onSessionId: (sessionId) => {
@@ -827,13 +827,13 @@ test("pty manager can force a fresh SDK thread without overwriting project conte
   await waitFor(() => !manager.getStatus(9).active);
 
   assert.equal(calls[0].action, "start");
-  assert.equal(observedSessionId, topicThreadId);
+  assert.equal(observedSessionId, explicitThreadId);
   assert.equal(manager.getStatus(9).projectSessionId, projectThreadId);
 });
 
-test("pty manager resumes an explicit SDK topic thread", async () => {
+test("pty manager resumes an explicit SDK thread", async () => {
   const calls: FakeCall[] = [];
-  const topicThreadId = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
+  const explicitThreadId = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
   const manager = createManager({
     backend: "sdk",
     codexClientFactory: createFakeCodexClient(
@@ -845,7 +845,7 @@ test("pty manager resumes an explicit SDK topic thread", async () => {
               item: {
                 id: "item-1",
                 type: "agent_message",
-                text: "Topic resumed."
+                text: "Explicit thread resumed."
               }
             };
           }
@@ -855,14 +855,14 @@ test("pty manager resumes an explicit SDK topic thread", async () => {
     )
   });
 
-  await manager.sendPrompt({ chat: { id: 9 } }, "continue topic", {
-    conversationSessionId: topicThreadId,
+  await manager.sendPrompt({ chat: { id: 9 } }, "continue explicit thread", {
+    conversationSessionId: explicitThreadId,
     trackProjectConversation: false
   });
   await waitFor(() => !manager.getStatus(9).active);
 
   assert.equal(calls[0].action, "resume");
-  assert.equal(calls[0].id, topicThreadId);
+  assert.equal(calls[0].id, explicitThreadId);
   assert.equal(manager.getStatus(9).projectSessionId, null);
 });
 

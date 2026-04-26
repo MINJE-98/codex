@@ -7,14 +7,13 @@
 - `src/orchestrator/`: routing, MCP client, skill registry, GitHub/MCP skills.
 - `src/runner/`: Codex SDK/CLI runner management, PTY fallback handling, and restricted shell execution.
 - `src/cron/`: scheduled proactive jobs.
-- `harness/`: topic-context operating rules, handoff notes, and reliability policy for noisy chat sessions.
 - `tests/`: Node built-in test suite, one `*.test.js` file per module area.
 
-## Harness Reading
+## Architecture Boundary
 
-- Read `harness/HARNESS_DESIGN_SPEC.md` before changing topic/session routing, runner behavior, runtime state, or Telegram UX.
-- Read `harness/policies/topic_context_policy.md` before changing how user messages are classified, queued, paused, or switched.
-- Read `harness/state/HANDOFF.md` before continuing interrupted harness work.
+- CodexClaw is a Telegram-to-Codex bridge. Keep user intent policy, response style, topic-switch judgment, and agent behavior in the configured Codex home, not in this repository.
+- Repo-owned state should stay transport-oriented: Telegram chat state, current workdir, Codex runner/session ids, skill toggles, MCP state, uploads, dev-server state, scheduler state, and process management.
+- Do not add repo-side semantic classifiers for user requests unless the user explicitly asks for bridge-level routing.
 
 ## Start And Dev Commands
 

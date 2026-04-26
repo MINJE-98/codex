@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { RuntimeStateStore } from "../src/runtimeStateStore.js";
 
-test("runtime state store defaults topic harness state", async () => {
+test("runtime state store defaults bridge-owned state only", async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "claws-state-"));
   const file = path.join(tempDir, "missing-runtime-state.json");
   const store = new RuntimeStateStore({
@@ -19,9 +19,12 @@ test("runtime state store defaults topic harness state", async () => {
 
   const state = await store.load();
 
-  assert.deepEqual(state.topics, {
-    chats: {}
-  });
+  assert.deepEqual(Object.keys(state).sort(), [
+    "mcp",
+    "runner",
+    "skills",
+    "version"
+  ]);
 });
 
 test("runtime state store saves and loads MCP and skill state", async () => {
@@ -66,34 +69,6 @@ test("runtime state store saves and loads MCP and skill state", async () => {
           enabledSkills: ["mcp"]
         }
       }
-    },
-    topics: {
-      chats: {
-        42: {
-          projects: {
-            "project-a": {
-              activeTopicId: "T001",
-              topics: [
-                {
-                  id: "T001",
-                  type: "repo",
-                  durability: "durable",
-                  status: "active",
-                  title: "Implement topic harness",
-                  summary: "",
-                  lastUserIntent: "Implement topic harness",
-                  workdir: "project-a",
-                  createdAt: "2026-04-26T10:00:00.000Z",
-                  updatedAt: "2026-04-26T10:00:00.000Z",
-                  codexThreadId: null,
-                  lastError: null
-                }
-              ],
-              pendingSwitch: null
-            }
-          }
-        }
-      }
     }
   });
 
@@ -129,8 +104,4 @@ test("runtime state store saves and loads MCP and skill state", async () => {
       }
     }
   });
-  assert.equal(
-    state.topics.chats[42].projects["project-a"].topics[0].title,
-    "Implement topic harness"
-  );
 });

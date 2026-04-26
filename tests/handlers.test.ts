@@ -4,8 +4,6 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { registerHandlers } from "../src/bot/handlers.js";
-import { TopicHarness } from "../src/harness/topicHarness.js";
-import { classifyTopicRequest } from "../src/harness/topicClassifier.js";
 
 type Handler = (ctx: TestContext) => Promise<void> | void;
 
@@ -178,7 +176,6 @@ function createDependencies(
     restart?: () => Promise<void>;
     syncTelegramCommands?: () => Promise<boolean>;
     codexSkillRoots?: string[];
-    topicHarness?: TopicHarness;
     saveUpload?: (
       ctx: TestContext,
       kind: "document" | "image"
@@ -193,7 +190,6 @@ function createDependencies(
   } = {}
 ) {
   const bot = new FakeBot();
-  const topicHarness = overrides.topicHarness || new TopicHarness();
   const ptyManager = {
     getLanguage: () => "en",
     sendPrompt:
@@ -334,7 +330,6 @@ function createDependencies(
     scheduler: {
       triggerDailySummaryNow: async () => {}
     } as any,
-    topicHarness,
     fileUploads: {
       save:
         overrides.saveUpload ||
@@ -624,197 +619,25 @@ test("status command renders a Codex dashboard with action buttons", async () =>
   assert.ok(callbacks.includes("dash:stop"));
 });
 
-test("work command shows topic context state", async () => {
-  const topicHarness = new TopicHarness();
-  topicHarness.evaluateIncoming({
-    chatId: 1,
-    workdir: process.cwd(),
-    text: "Implement topic harness",
-    classification: classifyTopicRequest("Implement topic harness")
-  });
-  topicHarness.evaluateIncoming({
-    chatId: 1,
-    workdir: process.cwd(),
-    text: "Find latest OpenAI API changes",
-    classification: classifyTopicRequest("Find latest OpenAI API changes")
-  });
-  topicHarness.queuePendingSwitch(1, process.cwd());
+test("bot does not register repo-owned topic context commands", async () => {
+  const { bot } = createDependencies();
 
-  const { bot } = createDependencies({ topicHarness });
-  const ctx = createContext("/work");
-  const handler = bot.commands.get("work");
-
-  if (!handler) {
-    throw new Error("Expected /work handler to be registered");
+  for (const name of [
+    "work",
+    "queue",
+    "switch",
+    "close",
+    "pause",
+    "done",
+    "drop"
+  ]) {
+    assert.equal(bot.commands.has(name), false);
   }
-
-  await handler(ctx);
-
-  assert.match(ctx.replies[0].text, /Active: T001 Implement topic harness/i);
-  assert.match(ctx.replies[0].text, /Pending: 1/i);
 });
 
-test("text handler asks before switching away from an active durable context", async () => {
-  const topicHarness = new TopicHarness();
-  topicHarness.evaluateIncoming({
-    chatId: 1,
-    workdir: process.cwd(),
-    text: "Implement topic harness",
-    classification: classifyTopicRequest("Implement topic harness")
-  });
-  let sendPromptCalls = 0;
-  const { bot } = createDependencies({
-    topicHarness,
-    sendPrompt: async () => {
-      sendPromptCalls += 1;
-      return {
-        started: true,
-        mode: "sdk"
-      };
-    }
-  });
-  const ctx = createContext("Find latest OpenAI API changes");
-  const handler = bot.events.get("text");
-
-  if (!handler) {
-    throw new Error("Expected text handler to be registered");
-  }
-
-  await handler(ctx);
-
-  assert.equal(sendPromptCalls, 0);
-  assert.match(ctx.replies[0].text, /active context/i);
-  assert.match(ctx.replies[0].text, /Implement topic harness/i);
-  assert.equal(
-    topicHarness.getProject(1, process.cwd()).pendingSwitch?.incomingText,
-    "Find latest OpenAI API changes"
-  );
-});
-
-test("queue command keeps active context and queues pending switch", async () => {
-  const topicHarness = new TopicHarness();
-  topicHarness.evaluateIncoming({
-    chatId: 1,
-    workdir: process.cwd(),
-    text: "Implement topic harness",
-    classification: classifyTopicRequest("Implement topic harness")
-  });
-  topicHarness.evaluateIncoming({
-    chatId: 1,
-    workdir: process.cwd(),
-    text: "Install Gmail skill",
-    classification: classifyTopicRequest("Install Gmail skill")
-  });
-
-  const { bot } = createDependencies({ topicHarness });
-  const ctx = createContext("/queue");
-  const handler = bot.commands.get("queue");
-
-  if (!handler) {
-    throw new Error("Expected /queue handler to be registered");
-  }
-
-  await handler(ctx);
-
-  const project = topicHarness.getProject(1, process.cwd());
-  assert.equal(project.activeTopicId, "T001");
-  assert.equal(project.pendingSwitch, null);
-  assert.equal(project.topics[1].status, "pending");
-  assert.match(ctx.replies[0].text, /Queued: T002 Install Gmail skill/i);
-});
-
-test("switch command pauses active context and starts pending switch", async () => {
-  const topicHarness = new TopicHarness();
-  topicHarness.evaluateIncoming({
-    chatId: 1,
-    workdir: process.cwd(),
-    text: "Implement topic harness",
-    classification: classifyTopicRequest("Implement topic harness")
-  });
-  topicHarness.evaluateIncoming({
-    chatId: 1,
-    workdir: process.cwd(),
-    text: "Find latest OpenAI API changes",
-    classification: classifyTopicRequest("Find latest OpenAI API changes")
-  });
-  let routedPrompt = "";
-  const { bot } = createDependencies({
-    topicHarness,
-    sendPrompt: async (_ctx, prompt) => {
-      routedPrompt = prompt;
-      return {
-        started: true,
-        mode: "sdk"
-      };
-    }
-  });
-  const ctx = createContext("/switch");
-  const handler = bot.commands.get("switch");
-
-  if (!handler) {
-    throw new Error("Expected /switch handler to be registered");
-  }
-
-  await handler(ctx);
-
-  const project = topicHarness.getProject(1, process.cwd());
-  assert.equal(project.topics[0].status, "paused");
-  assert.equal(project.activeTopicId, "T002");
-  assert.match(routedPrompt, /Find latest OpenAI API changes/);
-});
-
-test("text handler starts durable topics with a fresh topic-scoped Codex thread", async () => {
-  const topicHarness = new TopicHarness();
+test("text handler forwards messages without bot-side topic options", async () => {
   const sendOptions: Array<Record<string, unknown> | undefined> = [];
   const { bot } = createDependencies({
-    topicHarness,
-    sendPrompt: async (_ctx, _prompt, options) => {
-      sendOptions.push(options);
-      (options?.onSessionId as ((sessionId: string) => void) | undefined)?.(
-        "topic-thread-1"
-      );
-      return {
-        started: true,
-        mode: "sdk"
-      };
-    }
-  });
-  const ctx = createContext("Implement topic harness");
-  const handler = bot.events.get("text");
-
-  if (!handler) {
-    throw new Error("Expected text handler to be registered");
-  }
-
-  await handler(ctx);
-
-  assert.equal(sendOptions.length, 1);
-  assert.equal(sendOptions[0]?.conversationSessionId, null);
-  assert.equal(sendOptions[0]?.trackProjectConversation, false);
-
-  const project = topicHarness.getProject(1, process.cwd());
-  assert.equal(project.activeTopicId, "T001");
-  assert.equal(project.topics[0].codexThreadId, "topic-thread-1");
-});
-
-test("text handler resumes the active topic Codex thread", async () => {
-  const topicHarness = new TopicHarness();
-  topicHarness.evaluateIncoming({
-    chatId: 1,
-    workdir: process.cwd(),
-    text: "Implement topic harness",
-    classification: classifyTopicRequest("Implement topic harness")
-  });
-  topicHarness.recordThreadId(
-    1,
-    process.cwd(),
-    "T001",
-    "topic-thread-existing"
-  );
-
-  const sendOptions: Array<Record<string, unknown> | undefined> = [];
-  const { bot } = createDependencies({
-    topicHarness,
     sendPrompt: async (_ctx, _prompt, options) => {
       sendOptions.push(options);
       return {
@@ -833,8 +656,7 @@ test("text handler resumes the active topic Codex thread", async () => {
   await handler(ctx);
 
   assert.equal(sendOptions.length, 1);
-  assert.equal(sendOptions[0]?.conversationSessionId, "topic-thread-existing");
-  assert.equal(sendOptions[0]?.trackProjectConversation, false);
+  assert.equal(sendOptions[0], undefined);
 });
 
 test("skill list explains that superpowers is internal and not toggleable", async () => {

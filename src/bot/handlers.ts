@@ -20,26 +20,13 @@ import { escapeMarkdownV2, splitTelegramMessage } from "./formatter.js";
 import type { Scheduler } from "../cron/scheduler.js";
 import { toErrorMessage } from "../lib/errors.js";
 import type { Router } from "../orchestrator/router.js";
-import type {
-  PtyManager,
-  PtyManagerStatus,
-  SendPromptOptions
-} from "../runner/ptyManager.js";
+import type { PtyManager, PtyManagerStatus } from "../runner/ptyManager.js";
 import type {
   ShellExecutionResult,
   ShellManager
 } from "../runner/shellManager.js";
 import type { DevServerManager } from "../runner/devServerManager.js";
 import type { SkillRegistry } from "../orchestrator/skillRegistry.js";
-import {
-  classifyTopicRequest,
-  type TopicClassification
-} from "../harness/topicClassifier.js";
-import type {
-  ProjectTopicSnapshot,
-  TopicContextSnapshot,
-  TopicHarness
-} from "../harness/topicHarness.js";
 
 interface SkillResultPayload {
   text?: string;
@@ -56,7 +43,6 @@ interface RegisterHandlersOptions {
   skills: Record<string, any>;
   skillRegistry: SkillRegistry;
   scheduler: Scheduler;
-  topicHarness: TopicHarness;
   fileUploads: TelegramFileUploadManagerLike;
   adminActions?: {
     restart?: () => Promise<void>;
@@ -415,65 +401,6 @@ function dashboardKeyboard(
   ]);
 }
 
-function activeTopic(
-  project: ProjectTopicSnapshot
-): TopicContextSnapshot | null {
-  if (!project.activeTopicId) return null;
-  return (
-    project.topics.find((topic) => topic.id === project.activeTopicId) || null
-  );
-}
-
-function formatTopicLine(topic: TopicContextSnapshot | null): string {
-  if (!topic) return "none";
-  return `${topic.id} ${topic.title}`;
-}
-
-function formatWorkSummary(project: ProjectTopicSnapshot): string {
-  const active = activeTopic(project);
-  const pending = project.topics.filter((topic) => topic.status === "pending");
-  const paused = project.topics.filter((topic) => topic.status === "paused");
-  const blocked = project.topics.filter((topic) => topic.status === "blocked");
-  const lines = [
-    "Topic contexts:",
-    `Active: ${formatTopicLine(active)}`,
-    `Pending: ${pending.length}`,
-    `Paused: ${paused.length}`,
-    `Blocked: ${blocked.length}`
-  ];
-
-  if (project.pendingSwitch) {
-    lines.push(`Pending switch: ${project.pendingSwitch.inferredTitle}`);
-  }
-
-  return lines.join("\n");
-}
-
-function formatContextSwitchPrompt(active: TopicContextSnapshot): string {
-  return [
-    `You have an active context: "${active.title}".`,
-    "",
-    "The new request looks separate.",
-    "What should I do with the current context?",
-    "",
-    "1. /queue - keep current context and queue the new request",
-    "2. /switch - pause current context and switch",
-    "3. /close - close current context and start the new request"
-  ].join("\n");
-}
-
-function sameTopicHeuristic(
-  ctx: any,
-  classification: TopicClassification,
-  project: ProjectTopicSnapshot
-): boolean {
-  const active = activeTopic(project);
-  if (!active) return false;
-  if (ctx.message?.reply_to_message) return true;
-  if (classification.type === "ops" && active.type === "repo") return true;
-  return classification.type === active.type;
-}
-
 function suggestProjectName(
   input: string,
   projects: Array<{ relativePath: string; name?: string }>
@@ -636,7 +563,6 @@ export function registerHandlers({
   skills,
   skillRegistry,
   scheduler,
-  topicHarness,
   fileUploads,
   adminActions,
   syncTelegramCommands,
@@ -696,11 +622,9 @@ export function registerHandlers({
     locale: Locale,
     text: string,
     {
-      includeReplyContext = true,
-      topic = null
+      includeReplyContext = true
     }: {
       includeReplyContext?: boolean;
-      topic?: TopicContextSnapshot | null;
     } = {}
   ): Promise<void> => {
     const workdir = workdirOf(ctx);
@@ -708,26 +632,9 @@ export function registerHandlers({
       chatId: ctx.chat.id
     });
     if (route.target === "pty") {
-      const sendOptions = topic
-        ? ({
-            conversationSessionId: topic.codexThreadId || null,
-            trackProjectConversation: false,
-            onSessionId: (sessionId: string) => {
-              topicHarness.recordThreadId(
-                ctx.chat.id,
-                workdir,
-                topic.id,
-                sessionId
-              );
-            }
-          } satisfies SendPromptOptions)
-        : undefined;
       const result = await ptyManager.sendPrompt(
         ctx,
-        includeReplyContext
-          ? withReplyContext(ctx, route.prompt)
-          : route.prompt,
-        sendOptions
+        includeReplyContext ? withReplyContext(ctx, route.prompt) : route.prompt
       );
       await handlePromptResult(ctx, locale, result);
       return;
@@ -801,100 +708,6 @@ export function registerHandlers({
       skills,
       skillRegistry
     });
-  });
-
-  command("work", async (ctx: any) => {
-    const project = topicHarness.getProject(ctx.chat.id, workdirOf(ctx));
-    await sendChunkedMarkdown(ctx, formatWorkSummary(project));
-  });
-
-  command("queue", async (ctx: any) => {
-    try {
-      const topic = topicHarness.queuePendingSwitch(
-        ctx.chat.id,
-        workdirOf(ctx)
-      );
-      await sendChunkedMarkdown(ctx, `Queued: ${formatTopicLine(topic)}`);
-    } catch (error) {
-      await sendChunkedMarkdown(
-        ctx,
-        `No pending context switch to queue. ${toErrorMessage(error)}`
-      );
-    }
-  });
-
-  command("switch", async (ctx: any) => {
-    const locale = localeOf(ctx.chat.id);
-    try {
-      const topic = topicHarness.pauseAndSwitch(ctx.chat.id, workdirOf(ctx));
-      await sendChunkedMarkdown(ctx, `Switched to: ${formatTopicLine(topic)}`);
-      await processRoutedText(ctx, locale, topic.lastUserIntent, {
-        includeReplyContext: false,
-        topic
-      });
-    } catch (error) {
-      await sendChunkedMarkdown(
-        ctx,
-        `No pending context switch to start. ${toErrorMessage(error)}`
-      );
-    }
-  });
-
-  command("close", async (ctx: any) => {
-    const locale = localeOf(ctx.chat.id);
-    try {
-      const topic = topicHarness.closeAndSwitch(ctx.chat.id, workdirOf(ctx));
-      await sendChunkedMarkdown(
-        ctx,
-        `Closed current context. Switched to: ${formatTopicLine(topic)}`
-      );
-      await processRoutedText(ctx, locale, topic.lastUserIntent, {
-        includeReplyContext: false,
-        topic
-      });
-    } catch (error) {
-      await sendChunkedMarkdown(
-        ctx,
-        `No pending context switch to start. ${toErrorMessage(error)}`
-      );
-    }
-  });
-
-  command("pause", async (ctx: any) => {
-    const topic = topicHarness.pauseActive(ctx.chat.id, workdirOf(ctx));
-    await sendChunkedMarkdown(
-      ctx,
-      topic
-        ? `Paused: ${formatTopicLine(topic)}`
-        : "No active context to pause."
-    );
-  });
-
-  command("done", async (ctx: any) => {
-    const topic = topicHarness.doneActive(ctx.chat.id, workdirOf(ctx));
-    await sendChunkedMarkdown(
-      ctx,
-      topic ? `Done: ${formatTopicLine(topic)}` : "No active context to close."
-    );
-  });
-
-  command("drop", async (ctx: any) => {
-    const topicId = extractCommandPayload(ctx.message.text, "drop").trim();
-    if (!topicId) {
-      await sendChunkedMarkdown(ctx, "Usage: /drop <topic-id>");
-      return;
-    }
-
-    try {
-      const topic = topicHarness.dropTopic(
-        ctx.chat.id,
-        workdirOf(ctx),
-        topicId
-      );
-      await sendChunkedMarkdown(ctx, `Dropped: ${formatTopicLine(topic)}`);
-    } catch (error) {
-      await sendChunkedMarkdown(ctx, toErrorMessage(error));
-    }
   });
 
   command("pwd", async (ctx: any) => {
@@ -1489,45 +1302,6 @@ export function registerHandlers({
   bot.on("callback_query", async (ctx: any) => {
     const locale = localeOf(ctx.chat.id);
     const data = ctx.callbackQuery?.data || "";
-    if (data.startsWith("topic:")) {
-      const action = data.replace("topic:", "");
-      await ctx.answerCbQuery();
-
-      if (action === "queue") {
-        const topic = topicHarness.queuePendingSwitch(
-          ctx.chat.id,
-          workdirOf(ctx)
-        );
-        await sendChunkedMarkdown(ctx, `Queued: ${formatTopicLine(topic)}`);
-        return;
-      }
-
-      if (action === "switch") {
-        const topic = topicHarness.pauseAndSwitch(ctx.chat.id, workdirOf(ctx));
-        await sendChunkedMarkdown(
-          ctx,
-          `Switched to: ${formatTopicLine(topic)}`
-        );
-        await processRoutedText(ctx, locale, topic.lastUserIntent, {
-          includeReplyContext: false,
-          topic
-        });
-        return;
-      }
-
-      if (action === "close") {
-        const topic = topicHarness.closeAndSwitch(ctx.chat.id, workdirOf(ctx));
-        await sendChunkedMarkdown(
-          ctx,
-          `Closed current context. Switched to: ${formatTopicLine(topic)}`
-        );
-        await processRoutedText(ctx, locale, topic.lastUserIntent, {
-          includeReplyContext: false,
-          topic
-        });
-        return;
-      }
-    }
 
     if (data.startsWith("dash:")) {
       const action = data.replace("dash:", "");
@@ -1664,35 +1438,7 @@ export function registerHandlers({
     }
 
     try {
-      const workdir = workdirOf(ctx);
-      const classification = classifyTopicRequest(text);
-      const project = topicHarness.getProject(ctx.chat.id, workdir);
-      const gate = topicHarness.evaluateIncoming({
-        chatId: ctx.chat.id,
-        workdir,
-        text,
-        classification,
-        sameTopic: sameTopicHeuristic(ctx, classification, project)
-      });
-
-      if (gate.action === "ask_switch") {
-        await sendChunkedMarkdown(
-          ctx,
-          formatContextSwitchPrompt(gate.activeTopic),
-          Markup.inlineKeyboard([
-            [
-              Markup.button.callback("Keep + Queue", "topic:queue"),
-              Markup.button.callback("Pause + Switch", "topic:switch")
-            ],
-            [Markup.button.callback("Close + Switch", "topic:close")]
-          ])
-        );
-        return;
-      }
-
-      await processRoutedText(ctx, locale, text, {
-        topic: gate.topic
-      });
+      await processRoutedText(ctx, locale, text);
     } catch (error) {
       await sendChunkedMarkdown(
         ctx,
