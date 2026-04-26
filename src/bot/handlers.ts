@@ -139,6 +139,27 @@ function withMentionGate(handler: Handler): Handler {
   };
 }
 
+function getReplyContextText(ctx: any): string {
+  const reply = ctx.message?.reply_to_message;
+  const text = reply?.text || reply?.caption || "";
+  return String(text).trim();
+}
+
+function withReplyContext(ctx: any, prompt: string): string {
+  const replyText = getReplyContextText(ctx);
+  if (!replyText) return prompt;
+
+  return [
+    "The user is replying to this previous Telegram message:",
+    "---",
+    replyText,
+    "---",
+    "",
+    "User message:",
+    prompt
+  ].join("\n");
+}
+
 async function sendChunkedMarkdown(
   ctx: any,
   text: string,
@@ -755,10 +776,14 @@ export function registerHandlers({
       return;
     }
 
-    const result = await ptyManager.sendPrompt(ctx, task, {
-      forceExec: true,
-      notice: t(locale, "execNotice")
-    });
+    const result = await ptyManager.sendPrompt(
+      ctx,
+      withReplyContext(ctx, task),
+      {
+        forceExec: true,
+        notice: t(locale, "execNotice")
+      }
+    );
 
     await handlePromptResult(ctx, locale, result);
   });
@@ -949,11 +974,15 @@ export function registerHandlers({
       return;
     }
 
-    const result = await ptyManager.sendPrompt(ctx, task, {
-      forceExec: true,
-      fullAuto: true,
-      notice: t(locale, "autoNotice")
-    });
+    const result = await ptyManager.sendPrompt(
+      ctx,
+      withReplyContext(ctx, task),
+      {
+        forceExec: true,
+        fullAuto: true,
+        notice: t(locale, "autoNotice")
+      }
+    );
 
     await handlePromptResult(ctx, locale, result);
   });
@@ -966,10 +995,14 @@ export function registerHandlers({
       return;
     }
 
-    const result = await ptyManager.sendPrompt(ctx, buildPlanPrompt(task), {
-      forceExec: true,
-      notice: t(locale, "planNotice")
-    });
+    const result = await ptyManager.sendPrompt(
+      ctx,
+      withReplyContext(ctx, buildPlanPrompt(task)),
+      {
+        forceExec: true,
+        notice: t(locale, "planNotice")
+      }
+    );
 
     await handlePromptResult(ctx, locale, result);
   });
@@ -1264,11 +1297,14 @@ export function registerHandlers({
 
       const result = await ptyManager.sendPrompt(
         ctx,
-        [
-          `Use the ${skillInvocation.skillName} skill for this task.`,
-          "",
-          skillInvocation.task
-        ].join("\n")
+        withReplyContext(
+          ctx,
+          [
+            `Use the ${skillInvocation.skillName} skill for this task.`,
+            "",
+            skillInvocation.task
+          ].join("\n")
+        )
       );
       await handlePromptResult(ctx, locale, result);
       return;
@@ -1279,7 +1315,10 @@ export function registerHandlers({
         chatId: ctx.chat.id
       });
       if (route.target === "pty") {
-        const result = await ptyManager.sendPrompt(ctx, route.prompt);
+        const result = await ptyManager.sendPrompt(
+          ctx,
+          withReplyContext(ctx, route.prompt)
+        );
         await handlePromptResult(ctx, locale, result);
         return;
       }

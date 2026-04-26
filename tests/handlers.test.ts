@@ -23,6 +23,8 @@ interface TestContext {
   message: {
     text: string;
     reply_to_message?: {
+      text?: string;
+      caption?: string;
       from?: {
         id?: number;
         is_bot?: boolean;
@@ -68,6 +70,8 @@ function createContext(
     botId?: number;
     botUsername?: string;
     replyToBot?: boolean;
+    replyText?: string;
+    replyCaption?: string;
   } = {}
 ): TestContext {
   const replies: ReplyRecord[] = [];
@@ -85,6 +89,10 @@ function createContext(
       ...(options.replyToBot
         ? {
             reply_to_message: {
+              ...(options.replyText ? { text: options.replyText } : {}),
+              ...(options.replyCaption
+                ? { caption: options.replyCaption }
+                : {}),
               from: {
                 id: botId,
                 is_bot: true,
@@ -688,6 +696,44 @@ test("text handler responds to group replies to the bot", async () => {
   await textHandler(ctx);
 
   assert.equal(routedText, "please fix the repo");
+});
+
+test("text handler includes replied message text in Codex prompt", async () => {
+  const prompts: string[] = [];
+  const { bot } = createDependencies({
+    routeMessage: async (text: string) => ({
+      target: "pty" as const,
+      prompt: text
+    }),
+    sendPrompt: async (_ctx, prompt) => {
+      prompts.push(prompt);
+      return {
+        started: true,
+        mode: "sdk"
+      };
+    }
+  });
+  const ctx = createContext("왜 이렇게 판단했어?", -100, {
+    chatType: "group",
+    botUsername: "CodexClawBot",
+    replyToBot: true,
+    replyText: "Money Printer health check failed: HTTP 500"
+  });
+  const textHandler = bot.events.get("text");
+
+  if (!textHandler) {
+    throw new Error("Expected text handler to be registered");
+  }
+
+  await textHandler(ctx);
+
+  assert.equal(prompts.length, 1);
+  assert.match(
+    prompts[0],
+    /The user is replying to this previous Telegram message:/
+  );
+  assert.match(prompts[0], /Money Printer health check failed: HTTP 500/);
+  assert.match(prompts[0], /User message:\n왜 이렇게 판단했어\?/);
 });
 
 test("command handlers ignore unmentioned group commands", async () => {
