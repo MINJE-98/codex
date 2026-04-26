@@ -312,6 +312,11 @@ function isAbortError(error: unknown): boolean {
   return name === "AbortError" || /aborted/i.test(message);
 }
 
+function isMissingThreadResumeError(error: unknown): boolean {
+  const message = toErrorMessage(error);
+  return /thread\/resume/i.test(message) && /no rollout found/i.test(message);
+}
+
 function summarizeSdkItem(item: ThreadItem, verbose: boolean): string | null {
   switch (item.type) {
     case "agent_message":
@@ -678,6 +683,23 @@ export class PtyManager {
       session.workdir
     );
     projectState.lastSessionId = sessionId;
+    this.onChange?.(this.exportState());
+  }
+
+  forgetSessionId(session: RunnerSession, sessionId: string): void {
+    if (session.sessionId === sessionId) {
+      session.sessionId = "";
+    }
+
+    if (!session.trackConversation) return;
+
+    const projectState = this.ensureProjectState(
+      session.chatId,
+      session.workdir
+    );
+    if (projectState.lastSessionId !== sessionId) return;
+
+    projectState.lastSessionId = "";
     this.onChange?.(this.exportState());
   }
 
@@ -1262,69 +1284,37 @@ export class PtyManager {
     let signal: ExitSignal = null;
 
     try {
-      const threadOptions = this.getSdkThreadOptions(
-        session.chatId,
-        session.workdir,
-        {
-          approvalPolicy: options.fullAuto ? "never" : undefined,
-          additionalDirectories: [
-            ...this.config.runner.sdkThreadOptions.additionalDirectories,
-            ...(options.additionalDirectories || [])
-          ]
-        }
-      );
-      const codex = this.getCodexClient();
-      const thread = options.resumeSessionId
-        ? codex.resumeThread(options.resumeSessionId, threadOptions)
-        : codex.startThread(threadOptions);
-
-      session.thread = thread;
-      if (thread.id) {
-        this.rememberSessionId(session, thread.id);
-      }
-
-      const streamed = await thread.runStreamed(prompt, {
-        signal: session.abortController?.signal
-      });
-
-      for await (const event of streamed.events) {
-        if (event.type === "thread.started") {
-          this.rememberSessionId(session, event.thread_id);
-          continue;
-        }
-
-        if (
-          event.type === "item.started" ||
-          event.type === "item.updated" ||
-          event.type === "item.completed"
-        ) {
-          if (this.updateSdkRenderableItem(session, event.item)) {
-            session.throttledFlush();
-          }
-          continue;
-        }
-
-        if (event.type === "turn.failed") {
-          exitCode = 1;
-          session.rawBuffer = [session.rawBuffer, event.error.message]
-            .filter(Boolean)
-            .join("\n\n");
-          session.throttledFlush();
-          continue;
-        }
-
-        if (event.type === "error") {
-          exitCode = 1;
-          session.rawBuffer = [session.rawBuffer, event.message]
-            .filter(Boolean)
-            .join("\n\n");
-          session.throttledFlush();
-        }
-      }
+      exitCode = await this.runSdkThread(session, prompt, options);
     } catch (error) {
       if (isAbortError(error) || session.abortController?.signal.aborted) {
         exitCode = null;
         signal = "SIGINT";
+      } else if (options.resumeSessionId && isMissingThreadResumeError(error)) {
+        this.forgetSessionId(session, options.resumeSessionId);
+        try {
+          exitCode = await this.runSdkThread(session, prompt, {
+            ...options,
+            resumeSessionId: ""
+          });
+        } catch (retryError) {
+          if (
+            isAbortError(retryError) ||
+            session.abortController?.signal.aborted
+          ) {
+            exitCode = null;
+            signal = "SIGINT";
+          } else {
+            exitCode = 1;
+            await this.bot.telegram
+              .sendMessage(
+                session.chatId,
+                t(this.getLanguage(session.chatId), "codexExecFailed", {
+                  error: toErrorMessage(retryError)
+                })
+              )
+              .catch(() => {});
+          }
+        }
       } else {
         exitCode = 1;
         await this.bot.telegram
@@ -1339,6 +1329,75 @@ export class PtyManager {
     } finally {
       await this.finalizeSession(session, exitCode, signal);
     }
+  }
+
+  async runSdkThread(
+    session: RunnerSession,
+    prompt: string,
+    options: SessionOptions = {}
+  ): Promise<number> {
+    let exitCode = 0;
+    const threadOptions = this.getSdkThreadOptions(
+      session.chatId,
+      session.workdir,
+      {
+        approvalPolicy: options.fullAuto ? "never" : undefined,
+        additionalDirectories: [
+          ...this.config.runner.sdkThreadOptions.additionalDirectories,
+          ...(options.additionalDirectories || [])
+        ]
+      }
+    );
+    const codex = this.getCodexClient();
+    const thread = options.resumeSessionId
+      ? codex.resumeThread(options.resumeSessionId, threadOptions)
+      : codex.startThread(threadOptions);
+
+    session.thread = thread;
+    if (thread.id) {
+      this.rememberSessionId(session, thread.id);
+    }
+
+    const streamed = await thread.runStreamed(prompt, {
+      signal: session.abortController?.signal
+    });
+
+    for await (const event of streamed.events) {
+      if (event.type === "thread.started") {
+        this.rememberSessionId(session, event.thread_id);
+        continue;
+      }
+
+      if (
+        event.type === "item.started" ||
+        event.type === "item.updated" ||
+        event.type === "item.completed"
+      ) {
+        if (this.updateSdkRenderableItem(session, event.item)) {
+          session.throttledFlush();
+        }
+        continue;
+      }
+
+      if (event.type === "turn.failed") {
+        exitCode = 1;
+        session.rawBuffer = [session.rawBuffer, event.error.message]
+          .filter(Boolean)
+          .join("\n\n");
+        session.throttledFlush();
+        continue;
+      }
+
+      if (event.type === "error") {
+        exitCode = 1;
+        session.rawBuffer = [session.rawBuffer, event.message]
+          .filter(Boolean)
+          .join("\n\n");
+        session.throttledFlush();
+      }
+    }
+
+    return exitCode;
   }
 
   ensureSession(

@@ -766,6 +766,105 @@ test("pty manager stores SDK thread ids per project and resumes them", async () 
   assert.match(resumedMessage.text, /Project A resumed/);
 });
 
+test("pty manager starts a fresh SDK thread when a saved thread is missing", async () => {
+  const calls: FakeCall[] = [];
+  const sentMessages: SentMessageRecord[] = [];
+  const staleThreadId = "019dc249-d3fb-7b92-91c7-833479eec2f3";
+  const freshThreadId = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+  const manager = createManager({
+    backend: "sdk",
+    telegram: {
+      sendMessage: async (chatId: string | number, text: string) => {
+        sentMessages.push({ chatId, text });
+        return { message_id: sentMessages.length };
+      },
+      editMessageText: async (
+        chatId: string | number,
+        messageId: number,
+        _inlineMessageId: string | undefined,
+        text: string
+      ) => {
+        sentMessages.push({ chatId, messageId, text, edited: true });
+        return {};
+      },
+      deleteMessage: async () => ({})
+    },
+    codexClientFactory: (() => ({
+      resumeThread(id: string, options: Record<string, unknown> = {}) {
+        calls.push({ action: "resume", id, options });
+        throw new Error(
+          "thread/resume: thread/resume failed: no rollout found for thread id 019dc249-d3fb-7b92-91c7-833479eec2f3"
+        );
+      },
+      startThread(options: Record<string, unknown> = {}) {
+        calls.push({ action: "start", options });
+        return {
+          id: freshThreadId,
+          async runStreamed() {
+            return {
+              events: (async function* () {
+                yield {
+                  type: "thread.started",
+                  thread_id: freshThreadId
+                };
+                yield {
+                  type: "item.completed",
+                  item: {
+                    id: "item-1",
+                    type: "agent_message",
+                    text: "Fresh thread ready."
+                  }
+                };
+                yield {
+                  type: "turn.completed",
+                  usage: {
+                    input_tokens: 1,
+                    cached_input_tokens: 0,
+                    output_tokens: 1
+                  }
+                };
+              })()
+            };
+          }
+        };
+      }
+    })) as CodexClientFactory
+  });
+
+  manager.restoreState({
+    chats: {
+      "9": {
+        preferredModel: null,
+        language: "en",
+        verboseOutput: false,
+        currentWorkdir: ".",
+        recentWorkdirs: ["."],
+        projects: {
+          ".": {
+            lastSessionId: staleThreadId,
+            lastMode: "sdk",
+            lastExitCode: 0,
+            lastExitSignal: null,
+            lastWorkflowPhase: null
+          }
+        }
+      }
+    }
+  });
+
+  await manager.sendPrompt({ chat: { id: 9 } }, "recover stale thread");
+  await waitFor(() => !manager.getStatus(9).active);
+
+  assert.equal(calls[0].action, "resume");
+  assert.equal(calls[0].id, staleThreadId);
+  assert.equal(calls[1].action, "start");
+  assert.equal(manager.getStatus(9).projectSessionId, freshThreadId);
+  assert.ok(
+    sentMessages.every((message) => !/no rollout found/.test(message.text))
+  );
+  assert.match(sentMessages.at(-1)?.text || "", /Fresh thread ready/);
+});
+
 test("pty manager does not persist SDK thread ids for one-off runs", async () => {
   const calls: FakeCall[] = [];
   const manager = createManager({
