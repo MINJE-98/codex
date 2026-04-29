@@ -107,16 +107,19 @@ const DOCUMENT_EXTENSIONS = new Set([
   ...TEXT_EXTENSIONS,
   ".docx",
   ".pdf",
-  ".xlsx"
+  ".xlsx",
+  ".zip"
 ]);
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 const SUPPORTED_EXACT_MIME_TYPES = new Set([
   "application/json",
   "application/pdf",
   "application/sql",
+  "application/zip",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/xml",
+  "application/x-zip-compressed",
   "application/x-yaml",
   "image/jpeg",
   "image/png",

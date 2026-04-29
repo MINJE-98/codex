@@ -80,6 +80,72 @@ test("TelegramFileUploadManager downloads supported documents", async () => {
   );
 });
 
+test("TelegramFileUploadManager downloads zip documents", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "claws-zip-"));
+  const manager = new TelegramFileUploadManager({
+    uploadRoot: root,
+    requestImpl: async () => ({
+      statusCode: 200,
+      body: Readable.from(["zip-bytes"])
+    })
+  });
+
+  const result = await manager.save(
+    {
+      chat: { id: 1 },
+      message: {
+        document: {
+          file_id: "zip-1",
+          file_name: "notion-export.zip",
+          mime_type: "application/zip",
+          file_size: 9
+        }
+      },
+      telegram: {
+        getFileLink: async () => new URL("https://telegram.example/zip")
+      }
+    },
+    "document"
+  );
+
+  assert.equal(result.originalName, "notion-export.zip");
+  assert.equal(result.mimeType, "application/zip");
+  assert.equal(await fs.readFile(result.filePath, "utf8"), "zip-bytes");
+});
+
+test("TelegramFileUploadManager accepts zip documents reported as octet-stream", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "claws-zip-"));
+  const manager = new TelegramFileUploadManager({
+    uploadRoot: root,
+    requestImpl: async () => ({
+      statusCode: 200,
+      body: Readable.from(["zip-bytes"])
+    })
+  });
+
+  const result = await manager.save(
+    {
+      chat: { id: 1 },
+      message: {
+        document: {
+          file_id: "zip-2",
+          file_name: "notion-export.zip",
+          mime_type: "application/octet-stream",
+          file_size: 9
+        }
+      },
+      telegram: {
+        getFileLink: async () => new URL("https://telegram.example/zip")
+      }
+    },
+    "document"
+  );
+
+  assert.equal(result.originalName, "notion-export.zip");
+  assert.equal(result.mimeType, "application/octet-stream");
+  assert.equal(await fs.readFile(result.filePath, "utf8"), "zip-bytes");
+});
+
 test("TelegramFileUploadManager uses the largest photo size", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "claws-photo-"));
   const requestedFileIds: string[] = [];
